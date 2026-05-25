@@ -1,40 +1,133 @@
 {% extends "base.html" %}
-{% block title %}KBO 예측 분석 — 홈{% endblock %}
+{% block title %}KBO 예측 분석 — 팀 순위{% endblock %}
 
 {% block content %}
-<section class="hero">
-  <h1>KBO 프로야구 일별 승부 예측</h1>
-  <p>경기 데이터와 흐름 분석을 바탕으로 매일 승부를 예측합니다.</p>
-</section>
+<div class="home-layout">
 
-<section class="recent">
-  <h2>최근 예측</h2>
-  {% if predictions %}
-  <div class="card-grid">
-    {% for pred in predictions %}
-    <a href="{{ url_for('main.prediction_detail', pred_id=pred.id) }}" class="card">
-      <div class="card-date">{{ pred.game_date.strftime('%Y.%m.%d') }}</div>
-      <div class="card-matchup">{{ pred.away_team }} <span class="vs">vs</span> {{ pred.home_team }}</div>
-      <div class="card-pick">
-        예측: <strong>{{ pred.predicted_winner }}</strong>
-        {% if pred.confidence %}
-        <span class="confidence">{{ pred.confidence }}%</span>
-        {% endif %}
-      </div>
-      {% if pred.actual_winner %}
-        {% if pred.is_correct %}
-        <div class="result correct">✓ 적중</div>
-        {% else %}
-        <div class="result wrong">✗ 빗나감</div>
-        {% endif %}
-      {% else %}
-        <div class="result pending">경기 전</div>
+  <!-- 메인: 팀 순위 -->
+  <section class="home-main">
+    <div class="teams-header">
+      <h1>팀 순위</h1>
+      {% if scraped_at %}
+      <span class="scraped-at">{{ scraped_at.strftime('%Y.%m.%d %H:%M') }} 기준</span>
       {% endif %}
-    </a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <p class="empty">아직 예측이 없습니다. <a href="{{ url_for('main.new_prediction') }}">첫 번째 예측을 작성해보세요.</a></p>
-  {% endif %}
-</section>
+      <button class="btn-scrape" id="scrapeBtn" onclick="doScrape()">데이터 갱신</button>
+    </div>
+
+    {% if standings %}
+    <div class="table-wrap">
+      <table class="standings-table">
+        <thead>
+          <tr>
+            <th>순위</th>
+            <th>팀</th>
+            <th>경기</th>
+            <th>승</th>
+            <th>무</th>
+            <th>패</th>
+            <th>승률</th>
+            <th>GB</th>
+            <th>득점</th>
+            <th>실점</th>
+            <th>득실차</th>
+            <th>최근10경기</th>
+            <th>연속</th>
+            <th>홈</th>
+            <th>원정</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in standings %}
+          <tr class="{% if loop.index <= 5 %}playoffs{% endif %}">
+            <td class="rank">{{ s.rank }}</td>
+            <td class="team-name">{{ s.team }}</td>
+            <td>{{ s.games }}</td>
+            <td>{{ s.wins }}</td>
+            <td>{{ s.draws }}</td>
+            <td>{{ s.losses }}</td>
+            <td class="win-pct">{{ "%.3f"|format(s.win_pct) }}</td>
+            <td>{{ s.gb if s.gb else '-' }}</td>
+            <td>{{ s.runs_scored }}</td>
+            <td>{{ s.runs_allowed }}</td>
+            <td class="{% if s.run_diff > 0 %}plus{% elif s.run_diff < 0 %}minus{% endif %}">
+              {{ '%+d'|format(s.run_diff) }}
+            </td>
+            <td>{{ s.last10 or '-' }}</td>
+            <td class="streak {% if s.streak_num >= 3 %}streak-win{% elif s.streak_num <= -3 %}streak-lose{% endif %}">
+              {{ s.streak or '-' }}
+            </td>
+            <td>{{ s.home_record or '-' }}</td>
+            <td>{{ s.away_record or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>팀 순위 데이터가 없습니다.</p>
+      <p>우측 상단 <strong>데이터 갱신</strong> 버튼을 눌러 스크래핑하세요.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- 사이드바: 오늘 경기 -->
+  <aside class="home-sidebar">
+    <div class="sidebar-header">
+      <h2>오늘 경기</h2>
+      <span class="sidebar-date">{{ today_games[0].game_date.strftime('%m.%d') if today_games else '' }}</span>
+    </div>
+
+    {% if today_games %}
+    <div class="game-cards">
+      {% for g in today_games %}
+      <a href="{{ url_for('main.simulate', away=g.away_team, home=g.home_team, date=g.game_date.isoformat()) }}"
+         class="game-card">
+        <div class="game-card-teams">
+          <span class="gc-team away">{{ g.away_team }}</span>
+          <span class="gc-vs">vs</span>
+          <span class="gc-team home">{{ g.home_team }}</span>
+        </div>
+        {% if g.away_pitcher or g.home_pitcher %}
+        <div class="game-card-pitchers">
+          <span>{{ g.away_pitcher or '미정' }}</span>
+          <span>{{ g.home_pitcher or '미정' }}</span>
+        </div>
+        {% endif %}
+        <div class="game-card-action">시뮬레이션 →</div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="sidebar-empty">
+      <p>오늘 경기 정보 없음</p>
+      <p class="sidebar-hint">데이터 갱신 후 표시됩니다</p>
+    </div>
+    {% endif %}
+  </aside>
+
+</div>
+
+<script>
+async function doScrape() {
+  const btn = document.getElementById('scrapeBtn');
+  btn.disabled = true;
+  btn.textContent = '갱신 중…';
+  try {
+    const r = await fetch('/admin/scrape', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      location.reload();
+    } else {
+      alert('오류: ' + d.error);
+      btn.disabled = false;
+      btn.textContent = '데이터 갱신';
+    }
+  } catch (e) {
+    alert('네트워크 오류');
+    btn.disabled = false;
+    btn.textContent = '데이터 갱신';
+  }
+}
+</script>
 {% endblock %}

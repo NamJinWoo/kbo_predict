@@ -11,27 +11,36 @@ main = Blueprint("main", __name__)
 
 @main.route("/")
 def index():
-    recent = (
-        Prediction.query
-        .order_by(Prediction.game_date.desc())
-        .limit(10)
-        .all()
-    )
-    # 최신 팀 순위 (스크래핑된 것 중 가장 최신)
-    latest_scrape = (
-        TeamStat.query
-        .order_by(TeamStat.scraped_at.desc())
-        .first()
-    )
+    latest = TeamStat.query.order_by(TeamStat.scraped_at.desc()).first()
     standings = []
-    if latest_scrape:
+    scraped_at = None
+    if latest:
+        scraped_at = latest.scraped_at
         standings = (
             TeamStat.query
-            .filter_by(scraped_at=latest_scrape.scraped_at)
+            .filter_by(scraped_at=latest.scraped_at)
             .order_by(TeamStat.rank)
             .all()
         )
-    return render_template("index.html", predictions=recent, standings=standings)
+    today_games = (
+        TodayGame.query
+        .filter_by(game_date=date.today())
+        .order_by(TodayGame.scraped_at.desc())
+        .all()
+    )
+    seen = set()
+    unique_games = []
+    for g in today_games:
+        key = (g.away_team, g.home_team)
+        if key not in seen:
+            seen.add(key)
+            unique_games.append(g)
+    return render_template(
+        "index.html",
+        standings=standings,
+        scraped_at=scraped_at,
+        today_games=unique_games,
+    )
 
 
 @main.route("/predictions")
@@ -102,6 +111,52 @@ def update_result(pred_id):
     pred.actual_winner = request.form["actual_winner"]
     db.session.commit()
     return redirect(url_for("main.prediction_detail", pred_id=pred_id))
+
+
+@main.route("/simulate")
+def simulate():
+    away = request.args.get("away", "")
+    home = request.args.get("home", "")
+    game_date_str = request.args.get("date", date.today().isoformat())
+
+    if not away or not home:
+        return redirect(url_for("main.index"))
+
+    latest = TeamStat.query.order_by(TeamStat.scraped_at.desc()).first()
+    team_stats = {}
+    if latest:
+        for ts in TeamStat.query.filter_by(scraped_at=latest.scraped_at).all():
+            team_stats[ts.team] = ts
+
+    away_stat = team_stats.get(away)
+    home_stat = team_stats.get(home)
+
+    try:
+        gd = datetime.strptime(game_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        gd = date.today()
+
+    game_info = (
+        TodayGame.query
+        .filter_by(game_date=gd, away_team=away, home_team=home)
+        .order_by(TodayGame.scraped_at.desc())
+        .first()
+    )
+
+    from app.simulator import run_simulation, generate_analysis
+    sim = run_simulation(away, home, away_stat, home_stat, game_info)
+    analysis = generate_analysis(sim, away_stat, home_stat)
+    html_analysis = markdown.markdown(analysis, extensions=["extra", "nl2br"])
+
+    return render_template(
+        "simulation.html",
+        sim=sim,
+        away_stat=away_stat,
+        home_stat=home_stat,
+        game_info=game_info,
+        html_analysis=html_analysis,
+        game_date=game_date_str,
+    )
 
 
 @main.route("/stats")
