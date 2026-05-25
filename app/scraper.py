@@ -148,10 +148,76 @@ def _parse_pitcher_stats(ul_html: str) -> dict:
     return stats
 
 
+def scrape_kbo_teamrank() -> list[dict]:
+    """KBO 공식 사이트 팀 순위 페이지 파싱 (최근10경기, 연속, 홈/원정 전적 포함)"""
+    resp = requests.get(
+        "https://www.koreabaseball.com/Record/TeamRank/TeamRank.aspx",
+        headers={**HEADERS, "Referer": "https://www.koreabaseball.com/"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    html = resp.text
+
+    # 팀명이 있는 테이블 찾기
+    idx = html.find("삼성")
+    if idx < 0:
+        return []
+
+    table_start = html.rfind("<table", 0, idx)
+    table_end = html.find("</table>", idx) + len("</table>")
+    table = html[table_start:table_end]
+
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.DOTALL)
+    results = []
+    for row in rows:
+        cells = [
+            re.sub(r"<[^>]+>", "", c).strip()
+            for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+        ]
+        cells = [c for c in cells if c]
+        if len(cells) < 10:
+            continue
+        try:
+            results.append({
+                "rank":        int(cells[0]),
+                "team":        cells[1],
+                "games":       int(cells[2]),
+                "wins":        int(cells[3]),
+                "losses":      int(cells[4]),
+                "draws":       int(cells[5]),
+                "win_pct":     float(cells[6]),
+                "gb":          float(cells[7]),
+                "last10":      cells[8],   # "6승0무4패"
+                "streak":      cells[9],   # "3승" / "7패"
+                "home_record": cells[10] if len(cells) > 10 else "",
+                "away_record": cells[11] if len(cells) > 11 else "",
+            })
+        except (ValueError, IndexError):
+            continue
+    return results
+
+
 def scrape_all() -> dict:
-    """standings + today_games 한 번에"""
+    """statiz + KBO 공식 데이터 통합 스크래핑"""
+    statiz = scrape_standings()        # 득점/실점 포함
+    kbo = scrape_kbo_teamrank()        # 연속/최근10/홈원정 포함
+
+    # KBO 데이터를 팀명으로 인덱싱
+    kbo_map = {r["team"]: r for r in kbo}
+
+    # 두 소스 병합 (statiz 기본 + KBO 보완)
+    merged = []
+    for s in statiz:
+        k = kbo_map.get(s["team"], {})
+        merged.append({**s, **{
+            "last10":      k.get("last10", ""),
+            "streak":      k.get("streak", ""),
+            "home_record": k.get("home_record", ""),
+            "away_record": k.get("away_record", ""),
+        }})
+
     return {
         "scraped_at": datetime.utcnow().isoformat(),
-        "standings": scrape_standings(),
+        "standings": merged,
         "today_games": scrape_today_games(),
     }

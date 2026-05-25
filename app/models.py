@@ -4,7 +4,7 @@ import json
 
 
 class TeamStat(db.Model):
-    """statiz 홈에서 스크래핑한 팀 순위/스탯 스냅샷"""
+    """statiz + KBO 공식 사이트에서 스크래핑한 팀 순위/스탯 스냅샷"""
     id = db.Column(db.Integer, primary_key=True)
     scraped_at = db.Column(db.DateTime, default=datetime.utcnow)
     team = db.Column(db.String(20), nullable=False)
@@ -16,8 +16,14 @@ class TeamStat(db.Model):
     losses = db.Column(db.Integer)
     gb = db.Column(db.Float)
     win_pct = db.Column(db.Float)
+    # statiz 제공
     runs_scored = db.Column(db.Integer)
     runs_allowed = db.Column(db.Integer)
+    # KBO 공식 제공
+    last10 = db.Column(db.String(20))    # 최근 10경기: "6승0무4패"
+    streak = db.Column(db.String(10))    # 연속: "3승", "7패"
+    home_record = db.Column(db.String(20))   # "14-1-9"
+    away_record = db.Column(db.String(20))   # "14-0-9"
 
     @property
     def run_diff(self):
@@ -30,6 +36,18 @@ class TeamStat(db.Model):
     @property
     def runs_allowed_per_game(self):
         return round(self.runs_allowed / self.games, 2) if self.games else 0
+
+    @property
+    def streak_num(self):
+        """연속 숫자 추출 (양수=승, 음수=패)"""
+        if not self.streak:
+            return 0
+        import re
+        m = re.match(r'(\d+)(승|패)', self.streak)
+        if not m:
+            return 0
+        n = int(m.group(1))
+        return n if m.group(2) == '승' else -n
 
     def __repr__(self):
         return f"<TeamStat {self.team} {self.scraped_at.date()}>"

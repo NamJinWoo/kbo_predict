@@ -72,12 +72,21 @@ def new_prediction():
         .order_by(TodayGame.scraped_at.desc())
         .all()
     )
-    # 팀별 최신 스탯
+    # 팀별 최신 스탯 (JS에서 tojson 사용하므로 plain dict로 변환)
     latest = TeamStat.query.order_by(TeamStat.scraped_at.desc()).first()
     team_stats = {}
     if latest:
         for ts in TeamStat.query.filter_by(scraped_at=latest.scraped_at).all():
-            team_stats[ts.team] = ts
+            team_stats[ts.team] = {
+                "rank": ts.rank,
+                "wins": ts.wins,
+                "draws": ts.draws,
+                "losses": ts.losses,
+                "win_pct": ts.win_pct,
+                "runs_per_game": ts.runs_per_game,
+                "runs_allowed_per_game": ts.runs_allowed_per_game,
+                "run_diff": ts.run_diff,
+            }
 
     return render_template(
         "new_prediction.html",
@@ -141,15 +150,32 @@ def teams():
 
 @main.route("/admin/scrape", methods=["POST"])
 def admin_scrape():
-    from app.scraper import scrape_standings, scrape_today_games
-
     now = datetime.utcnow()
     scraped = 0
 
     try:
-        standings = scrape_standings()
+        from app.scraper import scrape_all
+        data = scrape_all()
+        standings = data["standings"]
         for s in standings:
-            ts = TeamStat(scraped_at=now, **s)
+            ts = TeamStat(
+                scraped_at=now,
+                team=s["team"],
+                team_code=s.get("team_code", ""),
+                rank=s.get("rank"),
+                games=s.get("games"),
+                wins=s.get("wins"),
+                draws=s.get("draws"),
+                losses=s.get("losses"),
+                gb=s.get("gb"),
+                win_pct=s.get("win_pct"),
+                runs_scored=s.get("runs_scored"),
+                runs_allowed=s.get("runs_allowed"),
+                last10=s.get("last10", ""),
+                streak=s.get("streak", ""),
+                home_record=s.get("home_record", ""),
+                away_record=s.get("away_record", ""),
+            )
             db.session.add(ts)
         scraped += len(standings)
     except Exception as e:
@@ -157,7 +183,7 @@ def admin_scrape():
         return jsonify({"ok": False, "error": f"standings: {e}"}), 500
 
     try:
-        games = scrape_today_games()
+        games = data["today_games"]
         for g in games:
             tg = TodayGame(
                 scraped_at=now,
@@ -228,42 +254,66 @@ def _build_draft(away: str, home: str, team_stats: dict, game: Optional[TodayGam
         lines.append("\n## 팀 성적 비교")
         lines.append("| 항목 | {} | {} |".format(away, home))
         lines.append("|------|------|------|")
-        rows = [
-            ("순위", away_stat.rank if away_stat else "-", home_stat.rank if home_stat else "-"),
-            ("승률", away_stat.win_pct if away_stat else "-", home_stat.win_pct if home_stat else "-"),
-            ("경기수", away_stat.games if away_stat else "-", home_stat.games if home_stat else "-"),
+
+        def v(stat, attr, default="-"):
+            return getattr(stat, attr) if stat else default
+
+        table_rows = [
+            ("순위",          v(away_stat,"rank"),      v(home_stat,"rank")),
+            ("승률",          v(away_stat,"win_pct"),   v(home_stat,"win_pct")),
             ("승-무-패",
              f"{away_stat.wins}-{away_stat.draws}-{away_stat.losses}" if away_stat else "-",
              f"{home_stat.wins}-{home_stat.draws}-{home_stat.losses}" if home_stat else "-"),
-            ("경기당 득점", away_stat.runs_per_game if away_stat else "-", home_stat.runs_per_game if home_stat else "-"),
-            ("경기당 실점", away_stat.runs_allowed_per_game if away_stat else "-", home_stat.runs_allowed_per_game if home_stat else "-"),
-            ("득실차", away_stat.run_diff if away_stat else "-", home_stat.run_diff if home_stat else "-"),
+            ("최근 10경기",   v(away_stat,"last10"),    v(home_stat,"last10")),
+            ("현재 연속",     v(away_stat,"streak"),    v(home_stat,"streak")),
+            ("홈 전적",       v(away_stat,"home_record"), v(home_stat,"home_record")),
+            ("원정 전적",     v(away_stat,"away_record"), v(home_stat,"away_record")),
+            ("경기당 득점",   v(away_stat,"runs_per_game"),         v(home_stat,"runs_per_game")),
+            ("경기당 실점",   v(away_stat,"runs_allowed_per_game"), v(home_stat,"runs_allowed_per_game")),
+            ("득실차",        v(away_stat,"run_diff"),  v(home_stat,"run_diff")),
         ]
-        for label, av, hv in rows:
+        for label, av, hv in table_rows:
             lines.append(f"| {label} | {av} | {hv} |")
 
     # 강점/약점 분석
     if away_stat and home_stat:
         lines.append("\n## 강점 / 약점 분석")
+
         lines.append(f"\n### {away} (원정)")
         if away_stat.runs_per_game > home_stat.runs_per_game:
-            lines.append(f"- 공격력 우세: 경기당 {away_stat.runs_per_game}득점 vs {home_stat.runs_per_game}득점")
+            lines.append(f"- 공격력 우세: 경기당 {away_stat.runs_per_game}득점 (상대 {home_stat.runs_per_game})")
         else:
-            lines.append(f"- 공격력 열세: 경기당 {away_stat.runs_per_game}득점 vs {home_stat.runs_per_game}득점")
+            lines.append(f"- 공격력 열세: 경기당 {away_stat.runs_per_game}득점 (상대 {home_stat.runs_per_game})")
         if away_stat.runs_allowed_per_game < home_stat.runs_allowed_per_game:
-            lines.append(f"- 수비/투구 우세: 경기당 {away_stat.runs_allowed_per_game}실점 vs {home_stat.runs_allowed_per_game}실점")
+            lines.append(f"- 투구/수비 우세: 경기당 {away_stat.runs_allowed_per_game}실점 (상대 {home_stat.runs_allowed_per_game})")
         else:
-            lines.append(f"- 수비/투구 열세: 경기당 {away_stat.runs_allowed_per_game}실점 vs {home_stat.runs_allowed_per_game}실점")
+            lines.append(f"- 투구/수비 열세: 경기당 {away_stat.runs_allowed_per_game}실점 (상대 {home_stat.runs_allowed_per_game})")
+        if away_stat.away_record:
+            lines.append(f"- 원정 전적: {away_stat.away_record}")
+        if away_stat.streak:
+            sn = away_stat.streak_num
+            if sn <= -3:
+                lines.append(f"- 현재 {abs(sn)}연패 중 → 흐름 나쁨 주의")
+            elif sn >= 3:
+                lines.append(f"- 현재 {sn}연승 중 → 상승세")
 
         lines.append(f"\n### {home} (홈)")
         if home_stat.runs_per_game > away_stat.runs_per_game:
-            lines.append(f"- 공격력 우세: 경기당 {home_stat.runs_per_game}득점 vs {away_stat.runs_per_game}득점")
+            lines.append(f"- 공격력 우세: 경기당 {home_stat.runs_per_game}득점 (상대 {away_stat.runs_per_game})")
         else:
-            lines.append(f"- 공격력 열세: 경기당 {home_stat.runs_per_game}득점 vs {away_stat.runs_per_game}득점")
+            lines.append(f"- 공격력 열세: 경기당 {home_stat.runs_per_game}득점 (상대 {away_stat.runs_per_game})")
         if home_stat.runs_allowed_per_game < away_stat.runs_allowed_per_game:
-            lines.append(f"- 수비/투구 우세: 경기당 {home_stat.runs_allowed_per_game}실점 vs {away_stat.runs_allowed_per_game}실점")
+            lines.append(f"- 투구/수비 우세: 경기당 {home_stat.runs_allowed_per_game}실점 (상대 {away_stat.runs_allowed_per_game})")
         else:
-            lines.append(f"- 수비/투구 열세: 경기당 {home_stat.runs_allowed_per_game}실점 vs {away_stat.runs_allowed_per_game}실점")
+            lines.append(f"- 투구/수비 열세: 경기당 {home_stat.runs_allowed_per_game}실점 (상대 {away_stat.runs_allowed_per_game})")
+        if home_stat.home_record:
+            lines.append(f"- 홈 전적: {home_stat.home_record}")
+        if home_stat.streak:
+            sn = home_stat.streak_num
+            if sn <= -3:
+                lines.append(f"- 현재 {abs(sn)}연패 중 → 흐름 나쁨 주의")
+            elif sn >= 3:
+                lines.append(f"- 현재 {sn}연승 중 → 상승세")
 
     lines.append("\n## 예측 근거\n\n<!-- 여기에 예측 근거를 직접 작성하세요 -->")
     lines.append("\n## 결론\n\n**예측: **  \n**확신도: **%")
