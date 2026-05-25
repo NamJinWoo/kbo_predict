@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ pred.away_team }} vs {{ pred.home_team }} — {{ pred.game_date.strftime('%Y.%m.%d') }}{% endblock %}
+
+{% block content %}
+<article class="detail">
+  <header class="detail-header">
+    <div class="detail-date">{{ pred.game_date.strftime('%Y년 %m월 %d일') }}</div>
+    <h1 class="detail-matchup">{{ pred.away_team }} vs {{ pred.home_team }}</h1>
+    <div class="detail-meta">
+      <span class="pick-badge">예측: <strong>{{ pred.predicted_winner }}</strong></span>
+      {% if pred.confidence %}
+      <span class="confidence-badge">확신도 {{ pred.confidence }}%</span>
+      {% endif %}
+      {% if pred.actual_winner %}
+        <span class="result-badge {{ 'correct' if pred.is_correct else 'wrong' }}">
+          {{ '✓ 적중 (' + pred.actual_winner + ' 승)' if pred.is_correct else '✗ 빗나감 (실제: ' + pred.actual_winner + ' 승)' }}
+        </span>
+      {% else %}
+        <span class="result-badge pending">경기 전</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <div class="analysis-body">
+    {{ html_analysis | safe }}
+  </div>
+
+  {% if not pred.actual_winner %}
+  <section class="update-result">
+    <h3>경기 결과 입력</h3>
+    <form method="POST" action="{{ url_for('main.update_result', pred_id=pred.id) }}">
+      <select name="actual_winner" required>
+        <option value="">승리팀 선택</option>
+        <option value="{{ pred.home_team }}">{{ pred.home_team }}</option>
+        <option value="{{ pred.away_team }}">{{ pred.away_team }}</option>
+      </select>
+      <button type="submit">결과 저장</button>
+    </form>
+  </section>
+  {% endif %}
+</article>
+
+<div class="back-link">
+  <a href="{{ url_for('main.predictions') }}">&larr; 목록으로</a>
+</div>
+{% endblock %}

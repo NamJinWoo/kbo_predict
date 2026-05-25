@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}새 예측 작성{% endblock %}
+
+{% block content %}
+<h1>새 예측 작성</h1>
+
+<form class="pred-form" method="POST">
+  <div class="form-row">
+    <label>경기 날짜
+      <input type="date" name="game_date" value="{{ today }}" required />
+    </label>
+  </div>
+
+  <div class="form-row two-col">
+    <label>원정팀
+      <select name="away_team" required>
+        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+        <option value="{{ team }}">{{ team }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>홈팀
+      <select name="home_team" required>
+        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+        <option value="{{ team }}">{{ team }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row two-col">
+    <label>예측 승리팀
+      <select name="predicted_winner" required>
+        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+        <option value="{{ team }}">{{ team }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>확신도 (%)
+      <input type="number" name="confidence" min="50" max="100" placeholder="예: 65" />
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>분석 내용 (마크다운 지원)
+      <textarea name="analysis" rows="16" placeholder="## 예측 근거&#10;&#10;### 선발 투수&#10;- 홈팀: ...&#10;- 원정팀: ...&#10;&#10;### 최근 전적&#10;..."></textarea>
+    </label>
+  </div>
+
+  <button type="submit" class="btn-submit">예측 저장</button>
+</form>
+{% endblock %}

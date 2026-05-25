@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}예측 목록{% endblock %}
+
+{% block content %}
+<h1>예측 목록</h1>
+
+<div class="card-grid">
+  {% for pred in pagination.items %}
+  <a href="{{ url_for('main.prediction_detail', pred_id=pred.id) }}" class="card">
+    <div class="card-date">{{ pred.game_date.strftime('%Y.%m.%d') }}</div>
+    <div class="card-matchup">{{ pred.away_team }} <span class="vs">vs</span> {{ pred.home_team }}</div>
+    <div class="card-pick">
+      예측: <strong>{{ pred.predicted_winner }}</strong>
+      {% if pred.confidence %}<span class="confidence">{{ pred.confidence }}%</span>{% endif %}
+    </div>
+    {% if pred.actual_winner %}
+      <div class="result {{ 'correct' if pred.is_correct else 'wrong' }}">
+        {{ '✓ 적중' if pred.is_correct else '✗ 빗나감' }}
+      </div>
+    {% else %}
+      <div class="result pending">경기 전</div>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="pagination">
+  {% if pagination.has_prev %}
+  <a href="{{ url_for('main.predictions', page=pagination.prev_num) }}">&laquo; 이전</a>
+  {% endif %}
+  <span>{{ pagination.page }} / {{ pagination.pages }}</span>
+  {% if pagination.has_next %}
+  <a href="{{ url_for('main.predictions', page=pagination.next_num) }}">다음 &raquo;</a>
+  {% endif %}
+</div>
+{% endblock %}

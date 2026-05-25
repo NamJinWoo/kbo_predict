@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}KBO 예측 분석{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="{{ url_for('main.index') }}" class="logo">⚾ KBO 예측 분석</a>
+      <ul>
+        <li><a href="{{ url_for('main.predictions') }}">예측 목록</a></li>
+        <li><a href="{{ url_for('main.stats') }}">적중률</a></li>
+        <li><a href="{{ url_for('main.new_prediction') }}" class="btn-new">+ 새 예측</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    <p>KBO 예측 분석 블로그 &mdash; 데이터 기반 야구 분석</p>
+  </footer>
+</body>
+</html>

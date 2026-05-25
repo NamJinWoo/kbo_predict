@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}KBO 예측 분석 — 홈{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>KBO 프로야구 일별 승부 예측</h1>
+  <p>경기 데이터와 흐름 분석을 바탕으로 매일 승부를 예측합니다.</p>
+</section>
+
+<section class="recent">
+  <h2>최근 예측</h2>
+  {% if predictions %}
+  <div class="card-grid">
+    {% for pred in predictions %}
+    <a href="{{ url_for('main.prediction_detail', pred_id=pred.id) }}" class="card">
+      <div class="card-date">{{ pred.game_date.strftime('%Y.%m.%d') }}</div>
+      <div class="card-matchup">{{ pred.away_team }} <span class="vs">vs</span> {{ pred.home_team }}</div>
+      <div class="card-pick">
+        예측: <strong>{{ pred.predicted_winner }}</strong>
+        {% if pred.confidence %}
+        <span class="confidence">{{ pred.confidence }}%</span>
+        {% endif %}
+      </div>
+      {% if pred.actual_winner %}
+        {% if pred.is_correct %}
+        <div class="result correct">✓ 적중</div>
+        {% else %}
+        <div class="result wrong">✗ 빗나감</div>
+        {% endif %}
+      {% else %}
+        <div class="result pending">경기 전</div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">아직 예측이 없습니다. <a href="{{ url_for('main.new_prediction') }}">첫 번째 예측을 작성해보세요.</a></p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}예측 적중률{% endblock %}
+
+{% block content %}
+<h1>예측 적중률</h1>
+
+<div class="stats-summary">
+  <div class="stat-box">
+    <div class="stat-number">{{ total }}</div>
+    <div class="stat-label">총 예측</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-number">{{ correct }}</div>
+    <div class="stat-label">적중</div>
+  </div>
+  <div class="stat-box highlight">
+    <div class="stat-number">{{ accuracy }}%</div>
+    <div class="stat-label">적중률</div>
+  </div>
+</div>
+
+{% if predictions %}
+<table class="stats-table">
+  <thead>
+    <tr>
+      <th>날짜</th>
+      <th>경기</th>
+      <th>예측</th>
+      <th>실제</th>
+      <th>결과</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for pred in predictions %}
+    <tr>
+      <td>{{ pred.game_date.strftime('%m.%d') }}</td>
+      <td>{{ pred.away_team }} vs {{ pred.home_team }}</td>
+      <td>{{ pred.predicted_winner }}</td>
+      <td>{{ pred.actual_winner }}</td>
+      <td class="{{ 'correct' if pred.is_correct else 'wrong' }}">
+        {{ '✓' if pred.is_correct else '✗' }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">아직 결과가 입력된 예측이 없습니다.</p>
+{% endif %}
+{% endblock %}
