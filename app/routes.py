@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
 from app import db
-from app.models import Prediction, TeamStat, TodayGame
+from app.models import Prediction, TeamStat, TodayGame, RecentGame
 from datetime import date, datetime
 from typing import Optional
 import markdown
@@ -11,6 +11,7 @@ main = Blueprint("main", __name__)
 
 @main.route("/")
 def index():
+    # 팀 순위
     latest = TeamStat.query.order_by(TeamStat.scraped_at.desc()).first()
     standings = []
     scraped_at = None
@@ -22,24 +23,43 @@ def index():
             .order_by(TeamStat.rank)
             .all()
         )
-    today_games = (
-        TodayGame.query
-        .filter_by(game_date=date.today())
-        .order_by(TodayGame.scraped_at.desc())
-        .all()
-    )
-    seen = set()
-    unique_games = []
-    for g in today_games:
-        key = (g.away_team, g.home_team)
-        if key not in seen:
-            seen.add(key)
-            unique_games.append(g)
+
+    # 최근 완료 경기 (가장 최근 날짜)
+    latest_result = RecentGame.query.order_by(RecentGame.game_date.desc()).first()
+    recent_games = []
+    if latest_result:
+        recent_games = (
+            RecentGame.query
+            .filter_by(game_date=latest_result.game_date)
+            .order_by(RecentGame.id)
+            .all()
+        )
+
+    # 다음 예정 경기 (가장 빠른 날짜의 TodayGame, 중복 제거)
+    upcoming_first = TodayGame.query.order_by(TodayGame.game_date.asc()).first()
+    upcoming_games = []
+    if upcoming_first:
+        rows = (
+            TodayGame.query
+            .filter_by(game_date=upcoming_first.game_date)
+            .order_by(TodayGame.scraped_at.desc())
+            .all()
+        )
+        seen = set()
+        for g in rows:
+            key = (g.away_team, g.home_team)
+            if key not in seen:
+                seen.add(key)
+                upcoming_games.append(g)
+
+    from app.scraper import STADIUM_MAP
     return render_template(
         "index.html",
         standings=standings,
         scraped_at=scraped_at,
-        today_games=unique_games,
+        recent_games=recent_games,
+        upcoming_games=upcoming_games,
+        stadium_map=STADIUM_MAP,
     )
 
 
@@ -255,8 +275,36 @@ def admin_scrape():
         db.session.rollback()
         return jsonify({"ok": False, "error": f"today_games: {e}"}), 500
 
+    try:
+        recent_list = data.get("recent_results", [])
+        for r in recent_list:
+            rg = RecentGame(
+                scraped_at=now,
+                game_date=r["game_date"],
+                away_team=r["away_team"],
+                home_team=r["home_team"],
+                away_score=r["away_score"],
+                home_score=r["home_score"],
+                win_pitcher=r.get("win_pitcher", ""),
+                lose_pitcher=r.get("lose_pitcher", ""),
+                save_pitcher=r.get("save_pitcher", ""),
+                hold_pitcher=r.get("hold_pitcher", ""),
+                stadium=r.get("stadium", ""),
+            )
+            db.session.add(rg)
+        scraped += len(recent_list)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": f"recent_results: {e}"}), 500
+
     db.session.commit()
-    return jsonify({"ok": True, "scraped": scraped, "standings": len(standings), "games": len(games)})
+    return jsonify({
+        "ok": True,
+        "scraped": scraped,
+        "standings": len(standings),
+        "games": len(games),
+        "recent": len(data.get("recent_results", [])),
+    })
 
 
 @main.route("/api/draft")

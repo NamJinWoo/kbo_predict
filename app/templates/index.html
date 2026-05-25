@@ -71,39 +71,75 @@
     {% endif %}
   </section>
 
-  <!-- 사이드바: 오늘 경기 -->
+  <!-- 사이드바 -->
   <aside class="home-sidebar">
-    <div class="sidebar-header">
-      <h2>오늘 경기</h2>
-      <span class="sidebar-date">{{ today_games[0].game_date.strftime('%m.%d') if today_games else '' }}</span>
+
+    <!-- 최근 경기 결과 -->
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>최근 경기</h2>
+        <span class="sidebar-date">{{ recent_games[0].game_date.strftime('%m.%d') if recent_games else '' }}</span>
+      </div>
+      {% if recent_games %}
+      <div class="result-cards">
+        {% for g in recent_games %}
+        <div class="result-card">
+          <div class="rc-teams">
+            <span class="rc-team {% if g.winner == g.away_team %}rc-winner{% endif %}">{{ g.away_team }}</span>
+            <span class="rc-score">{{ g.away_score }} : {{ g.home_score }}</span>
+            <span class="rc-team {% if g.winner == g.home_team %}rc-winner{% endif %}">{{ g.home_team }}</span>
+          </div>
+          <div class="rc-info">
+            {% if g.win_pitcher %}<span class="rc-tag win">승 {{ g.win_pitcher }}</span>{% endif %}
+            {% if g.save_pitcher %}<span class="rc-tag save">S {{ g.save_pitcher }}</span>{% endif %}
+            {% if g.hold_pitcher %}<span class="rc-tag hold">H {{ g.hold_pitcher }}</span>{% endif %}
+            {% if g.lose_pitcher %}<span class="rc-tag lose">패 {{ g.lose_pitcher }}</span>{% endif %}
+          </div>
+          {% if g.stadium %}<div class="rc-stadium">{{ g.stadium }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="sidebar-empty">
+        <p>경기 결과 없음</p>
+        <p class="sidebar-hint">데이터 갱신 후 표시됩니다</p>
+      </div>
+      {% endif %}
     </div>
 
-    {% if today_games %}
-    <div class="game-cards">
-      {% for g in today_games %}
-      <a href="{{ url_for('main.simulate', away=g.away_team, home=g.home_team, date=g.game_date.isoformat()) }}"
-         class="game-card">
-        <div class="game-card-teams">
-          <span class="gc-team away">{{ g.away_team }}</span>
-          <span class="gc-vs">vs</span>
-          <span class="gc-team home">{{ g.home_team }}</span>
-        </div>
-        {% if g.away_pitcher or g.home_pitcher %}
-        <div class="game-card-pitchers">
-          <span>{{ g.away_pitcher or '미정' }}</span>
-          <span>{{ g.home_pitcher or '미정' }}</span>
-        </div>
-        {% endif %}
-        <div class="game-card-action">시뮬레이션 →</div>
-      </a>
-      {% endfor %}
+    <!-- 다음 경기 -->
+    <div class="sidebar-section" style="margin-top:1.2rem;">
+      <div class="sidebar-header">
+        <h2>다음 경기</h2>
+        <span class="sidebar-date">{{ upcoming_games[0].game_date.strftime('%m.%d') if upcoming_games else '' }}</span>
+      </div>
+      {% if upcoming_games %}
+      <div class="game-cards">
+        {% for g in upcoming_games %}
+        <a href="{{ url_for('main.simulate', away=g.away_team, home=g.home_team, date=g.game_date.isoformat()) }}"
+           class="game-card">
+          <div class="game-card-teams">
+            <span class="gc-team away">{{ g.away_team }}</span>
+            <span class="gc-vs">vs</span>
+            <span class="gc-team home">{{ g.home_team }}</span>
+          </div>
+          <div class="game-card-pitchers">
+            <span>{{ g.away_pitcher or '미정' }}</span>
+            <span>{{ g.home_pitcher or '미정' }}</span>
+          </div>
+          <div class="gc-stadium">{{ stadium_map.get(g.home_team, '') }}</div>
+          <div class="game-card-action">시뮬레이션 →</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="sidebar-empty">
+        <p>예정 경기 없음</p>
+        <p class="sidebar-hint">데이터 갱신 후 표시됩니다</p>
+      </div>
+      {% endif %}
     </div>
-    {% else %}
-    <div class="sidebar-empty">
-      <p>오늘 경기 정보 없음</p>
-      <p class="sidebar-hint">데이터 갱신 후 표시됩니다</p>
-    </div>
-    {% endif %}
+
   </aside>
 
 </div>

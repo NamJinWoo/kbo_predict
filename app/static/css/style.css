@@ -353,8 +353,41 @@ footer { text-align: center; padding: 1.5rem; color: var(--text-muted); font-siz
   color: var(--accent);
   font-weight: 600;
 }
+.gc-stadium { font-size: .72rem; color: var(--text-muted); margin-bottom: .2rem; }
 .sidebar-empty { text-align: center; padding: 1rem 0; color: var(--text-muted); font-size: .9rem; }
 .sidebar-hint { font-size: .78rem; margin-top: .3rem; }
+.sidebar-section {}
+
+/* RECENT GAME RESULT CARDS */
+.result-cards { display: flex; flex-direction: column; gap: .5rem; }
+.result-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .65rem .75rem;
+}
+.rc-teams {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .35rem;
+  font-size: .88rem;
+}
+.rc-team { font-weight: 600; color: var(--text-muted); }
+.rc-team.rc-winner { color: var(--text); }
+.rc-score { font-size: .95rem; font-weight: 800; letter-spacing: .05em; }
+.rc-info { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .25rem; }
+.rc-tag {
+  font-size: .7rem;
+  font-weight: 600;
+  padding: .1rem .4rem;
+  border-radius: 4px;
+}
+.rc-tag.win  { background: #14532d; color: var(--correct); }
+.rc-tag.save { background: #1e3a5f; color: #60a5fa; }
+.rc-tag.hold { background: #2d2a14; color: #fbbf24; }
+.rc-tag.lose { background: #2a1414; color: var(--text-muted); }
+.rc-stadium { font-size: .7rem; color: var(--text-muted); }
 
 /* ── STANDINGS TABLE ─────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }

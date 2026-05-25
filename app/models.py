@@ -72,6 +72,31 @@ class TodayGame(db.Model):
         return f"<TodayGame {self.game_date} {self.away_team}@{self.home_team}>"
 
 
+class RecentGame(db.Model):
+    """완료된 경기 결과 (승리투수, 세이브 포함)"""
+    id = db.Column(db.Integer, primary_key=True)
+    scraped_at = db.Column(db.DateTime, default=datetime.utcnow)
+    game_date = db.Column(db.Date, nullable=False)
+    away_team = db.Column(db.String(20))
+    home_team = db.Column(db.String(20))
+    away_score = db.Column(db.Integer)
+    home_score = db.Column(db.Integer)
+    win_pitcher = db.Column(db.String(30))
+    lose_pitcher = db.Column(db.String(30))
+    save_pitcher = db.Column(db.String(30))
+    hold_pitcher = db.Column(db.String(30))
+    stadium = db.Column(db.String(40))
+
+    @property
+    def winner(self):
+        if self.away_score is None or self.home_score is None:
+            return None
+        return self.away_team if self.away_score > self.home_score else self.home_team
+
+    def __repr__(self):
+        return f"<RecentGame {self.game_date} {self.away_team}{self.away_score}-{self.home_score}{self.home_team}>"
+
+
 class Prediction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     game_date = db.Column(db.Date, nullable=False)
