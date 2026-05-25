@@ -1,6 +1,7 @@
 import re
 import requests
 from datetime import date, datetime, timedelta
+from typing import Optional
 
 HEADERS = {
     "User-Agent": (
@@ -319,6 +320,162 @@ def scrape_upcoming_games() -> list[dict]:
     return upcoming
 
 
+def _parse_ul_blocks(html: str) -> list[dict]:
+    """Parse all <ul> blocks into structured label/value dicts."""
+    ul_blocks = re.findall(r"<ul[^>]*>(.*?)</ul>", html, re.DOTALL)
+    parsed = []
+    for ul in ul_blocks:
+        items = re.findall(r'<li[^>]*class="([^"]+)"[^>]*>(.*?)</li>', ul, re.DOTALL)
+        block = {"values": [], "label": "", "away": None, "home": None}
+        for cls, val in items:
+            cls = cls.strip()
+            clean = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", val).strip())
+            if "label" in cls:
+                block["label"] = clean
+            elif "value" in cls:
+                block["values"].append(clean)
+            elif cls == "away":
+                block["away"] = clean
+            elif cls == "home":
+                block["home"] = clean
+        if block["label"] or block["values"] or block["away"]:
+            parsed.append(block)
+    return parsed
+
+
+def _extract_float(s: str) -> Optional[float]:
+    m = re.search(r"[\d.]+", s or "")
+    return float(m.group()) if m else None
+
+
+def _parse_prediction_full_stats(html: str) -> dict:
+    """
+    Extract comprehensive stats from a prediction game page.
+    Returns dict stored as stats_json in TodayGame.
+    """
+    blocks = _parse_ul_blocks(html)
+
+    # ── 선발 투수 시즌 스탯 (UL 12~19, label/value pairs) ──
+    pitcher_stat_labels = {"경기이닝", "승패", "평균자책", "WHIP", "피안타율", "탈삼진", "볼넷", "WAR"}
+    away_stats: dict = {}
+    home_stats: dict = {}
+    h2h_labels = {"상대전적", "상대 평균자책", "상대 OOPS", "상대 WHIP"}
+    away_h2h: dict = {}
+    home_h2h: dict = {}
+    team_comp_away: dict = {}
+    team_comp_home: dict = {}
+
+    for b in blocks:
+        lbl = b["label"]
+        vals = b["values"]
+        if not lbl:
+            continue
+
+        if lbl in pitcher_stat_labels and len(vals) >= 2:
+            away_stats[lbl] = vals[0]
+            home_stats[lbl] = vals[1]
+        elif lbl in h2h_labels and len(vals) >= 2:
+            away_h2h[lbl] = vals[0]
+            home_h2h[lbl] = vals[1]
+        elif b["away"] is not None and b["home"] is not None:
+            # Team comparison blocks (away/home class)
+            av = re.sub(r"\d+위\s*", "", b["away"]).strip()
+            hv = re.sub(r"\d+위\s*", "", b["home"]).strip()
+            team_comp_away[lbl] = av
+            team_comp_home[lbl] = hv
+
+    # ── 위험 타자 (player_box hitter) ──
+    # Block 0 = home team batters vs away pitcher (홈 타자 vs 원정 선발)
+    # Block 1 = away team batters vs home pitcher (원정 타자 vs 홈 선발)
+    pb_hitter_blocks = re.findall(
+        r'<div class="player_box hitter">(.*?)(?=<div class="player_box hitter"|</section>)',
+        html, re.DOTALL
+    )
+
+    def _parse_batters(section: str) -> list[dict]:
+        batters = []
+        p_inners = re.findall(r'<div class="p_inner[^"]*">(.*?)</div>\s*</div>\s*</div>', section, re.DOTALL)
+        items = re.findall(r'<div class="item">(.*?)</div>\s*</div>\s*</div>', section, re.DOTALL)
+        name_blocks = re.findall(
+            r'</a>\s*<div class="name">(.*?)</div>\s*<div class="name">OPS\s*:\s*([\d.]+)</div>',
+            section, re.DOTALL
+        )
+        for name_raw, ops_str in name_blocks:
+            name = re.sub(r"<[^>]+>", "", name_raw).strip()
+            try:
+                ops = float(ops_str)
+            except ValueError:
+                ops = 0.0
+            if name:
+                batters.append({"name": name, "ops": ops})
+        return batters
+
+    vs_away_pitcher = _parse_batters(pb_hitter_blocks[0]) if len(pb_hitter_blocks) > 0 else []
+    vs_home_pitcher = _parse_batters(pb_hitter_blocks[1]) if len(pb_hitter_blocks) > 1 else []
+
+    return {
+        "away": away_stats,
+        "home": home_stats,
+        "h2h": {"away": away_h2h, "home": home_h2h},
+        "team_comp": {"away": team_comp_away, "home": team_comp_home},
+        "dangerous_batters": {
+            "vs_away_pitcher": vs_away_pitcher,
+            "vs_home_pitcher": vs_home_pitcher,
+        },
+    }
+
+
+def _scrape_pitchers_for_date(target_date: date) -> dict:
+    """
+    Fetch starting pitchers + full game stats for all games on target_date.
+    Returns {(away_team, home_team): {"away_pitcher": str, "home_pitcher": str, "stats": dict}}.
+    Makes 1 + N HTTP requests (list page + one per game).
+    """
+    date_str = target_date.strftime("%Y%m%d")
+    resp = requests.get(
+        f"https://statiz.co.kr/prediction/?m=main&g_date={date_str}",
+        headers=HEADERS, timeout=10,
+    )
+    resp.raise_for_status()
+    html = resp.text
+
+    s_nos = re.findall(r"s_no=(\d+)", html)
+    result = {}
+    for s_no in s_nos:
+        pos = html.find(f"s_no={s_no}")
+        if pos < 0:
+            continue
+        snippet = html[pos : pos + 800]
+        codes = re.findall(r"/(\d{4,5})\.(?:svg|png)", snippet)
+        if len(codes) < 2:
+            continue
+        away_team = TEAM_CODE_MAP.get(codes[0], "")
+        home_team = TEAM_CODE_MAP.get(codes[1], "")
+        if not away_team or not home_team:
+            continue
+        try:
+            p_resp = requests.get(
+                f"https://statiz.co.kr/prediction/?s_no={s_no}",
+                headers=HEADERS, timeout=10,
+            )
+            p_resp.raise_for_status()
+            p_html = p_resp.text
+            names = re.findall(r'<div class="name">(.*?)</div>', p_html)
+            away_p = names[0].strip() if names else ""
+            home_p = names[1].strip() if len(names) > 1 else ""
+            full_stats = _parse_prediction_full_stats(p_html)
+            result[(away_team, home_team)] = {
+                "away_pitcher": away_p,
+                "home_pitcher": home_p,
+                "stats": full_stats,
+            }
+        except Exception:
+            result[(away_team, home_team)] = {
+                "away_pitcher": "", "home_pitcher": "", "stats": {}
+            }
+    return result
+
+
 def scrape_all() -> dict:
     """statiz + KBO 공식 데이터 통합 스크래핑"""
     statiz = scrape_standings()
@@ -339,6 +496,20 @@ def scrape_all() -> dict:
         recent_results, upcoming = _parse_game_page()
     except Exception:
         recent_results, upcoming = [], []
+
+    # 선발 투수 + 전체 예측 스탯 보강
+    if upcoming:
+        try:
+            enriched = _scrape_pitchers_for_date(upcoming[0]["game_date"])
+            for g in upcoming:
+                key = (g["away_team"], g["home_team"])
+                if key in enriched:
+                    d = enriched[key]
+                    g["away_pitcher"] = d["away_pitcher"]
+                    g["home_pitcher"] = d["home_pitcher"]
+                    g["stats"] = d["stats"]
+        except Exception:
+            pass
 
     return {
         "scraped_at":     datetime.utcnow().isoformat(),

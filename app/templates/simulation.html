@@ -39,55 +39,135 @@
       <span class="verdict-label">예측 승팀</span>
       <span class="verdict-team">{{ sim.predicted_winner }}</span>
       <span class="verdict-conf">{{ sim.confidence }}% 우세</span>
+      <button class="btn-rerun" onclick="rerunSim()" title="다시 시뮬레이션">↺ 재시뮬레이션</button>
     </div>
   </div>
 
   <div class="sim-body">
 
-    <!-- 왼쪽: 선발 투수 + 주요 요인 + 분석 -->
+    <!-- 왼쪽: 선발 투수 + 위험 타자 + 주요 요인 + 분석 -->
     <div class="sim-main">
 
       <!-- 선발 투수 비교 -->
       <section class="sim-section">
         <h2 class="sim-section-title">선발 투수</h2>
         <div class="pitcher-compare">
+
+          <!-- 원정 선발 -->
           <div class="pitcher-card">
             <div class="pitcher-team">{{ sim.away_team }} (원정)</div>
             <div class="pitcher-name">{{ sim.away_pitcher or '미정' }}</div>
             {% if sim.away_pitcher_era %}
             <div class="pitcher-era {% if sim.away_pitcher_era < 3.5 %}era-good{% elif sim.away_pitcher_era < 4.5 %}era-mid{% else %}era-bad{% endif %}">
-              ERA {{ "%.2f"|format(sim.away_pitcher_era) }}
+              시즌 ERA {{ "%.2f"|format(sim.away_pitcher_era) }}
             </div>
             {% endif %}
             {% if sim.pitcher_stats_away %}
             <div class="pitcher-stats">
-              {% for k, v in sim.pitcher_stats_away.items() %}
-              <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ v }}</span></div>
-              {% endfor %}
+              {% set key_order = ["경기이닝", "승패", "평균자책", "WHIP", "피안타율", "탈삼진", "볼넷", "WAR"] %}
+              {% for k in key_order %}{% if k in sim.pitcher_stats_away %}
+              <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ sim.pitcher_stats_away[k] }}</span></div>
+              {% endif %}{% endfor %}
+            </div>
+            {% endif %}
+            {% set h2h_away = sim.h2h.get('away', {}) if sim.h2h else {} %}
+            {% if h2h_away.get('상대 평균자책') and h2h_away['상대 평균자책'] != '0.00' %}
+            <div class="pitcher-h2h">
+              <div class="h2h-label">vs {{ sim.home_team }} 통산</div>
+              <div class="h2h-stats">
+                {% if h2h_away.get('상대전적') %}<span>{{ h2h_away['상대전적'] }}</span>{% endif %}
+                <span>ERA {{ h2h_away['상대 평균자책'] }}</span>
+                {% if h2h_away.get('상대 OOPS') %}<span>OOPS {{ h2h_away['상대 OOPS'] }}</span>{% endif %}
+              </div>
             </div>
             {% endif %}
           </div>
 
           <div class="pitcher-divider">VS</div>
 
+          <!-- 홈 선발 -->
           <div class="pitcher-card">
             <div class="pitcher-team">{{ sim.home_team }} (홈)</div>
             <div class="pitcher-name">{{ sim.home_pitcher or '미정' }}</div>
             {% if sim.home_pitcher_era %}
             <div class="pitcher-era {% if sim.home_pitcher_era < 3.5 %}era-good{% elif sim.home_pitcher_era < 4.5 %}era-mid{% else %}era-bad{% endif %}">
-              ERA {{ "%.2f"|format(sim.home_pitcher_era) }}
+              시즌 ERA {{ "%.2f"|format(sim.home_pitcher_era) }}
             </div>
             {% endif %}
             {% if sim.pitcher_stats_home %}
             <div class="pitcher-stats">
-              {% for k, v in sim.pitcher_stats_home.items() %}
-              <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ v }}</span></div>
-              {% endfor %}
+              {% set key_order = ["경기이닝", "승패", "평균자책", "WHIP", "피안타율", "탈삼진", "볼넷", "WAR"] %}
+              {% for k in key_order %}{% if k in sim.pitcher_stats_home %}
+              <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ sim.pitcher_stats_home[k] }}</span></div>
+              {% endif %}{% endfor %}
+            </div>
+            {% endif %}
+            {% set h2h_home = sim.h2h.get('home', {}) if sim.h2h else {} %}
+            {% if h2h_home.get('상대 평균자책') and h2h_home['상대 평균자책'] != '0.00' %}
+            <div class="pitcher-h2h">
+              <div class="h2h-label">vs {{ sim.away_team }} 통산</div>
+              <div class="h2h-stats">
+                {% if h2h_home.get('상대전적') %}<span>{{ h2h_home['상대전적'] }}</span>{% endif %}
+                <span>ERA {{ h2h_home['상대 평균자책'] }}</span>
+                {% if h2h_home.get('상대 OOPS') %}<span>OOPS {{ h2h_home['상대 OOPS'] }}</span>{% endif %}
+              </div>
             </div>
             {% endif %}
           </div>
+
         </div>
       </section>
+
+      <!-- 위험 타자 -->
+      {% set db = sim.dangerous_batters %}
+      {% if db and (db.get('vs_home_pitcher') or db.get('vs_away_pitcher')) %}
+      <section class="sim-section">
+        <h2 class="sim-section-title">위협 타자</h2>
+        <div class="danger-batters">
+
+          {% set vs_hp = db.get('vs_home_pitcher', []) %}
+          {% if vs_hp %}
+          <div class="danger-group">
+            <div class="danger-header">
+              <span class="danger-team away-tag">{{ sim.away_team }}</span>
+              <span class="danger-subtitle">vs {{ sim.home_pitcher or '홈 선발' }}</span>
+            </div>
+            <div class="danger-list">
+              {% for b in vs_hp[:5] %}
+              {% if b.ops %}
+              <div class="danger-row {% if b.ops >= 0.900 %}danger-hot{% elif b.ops >= 0.750 %}danger-warm{% endif %}">
+                <span class="danger-name">{{ b.name }}</span>
+                <span class="danger-ops">OPS {{ "%.3f"|format(b.ops) }}</span>
+              </div>
+              {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          {% set vs_ap = db.get('vs_away_pitcher', []) %}
+          {% if vs_ap %}
+          <div class="danger-group">
+            <div class="danger-header">
+              <span class="danger-team home-tag">{{ sim.home_team }}</span>
+              <span class="danger-subtitle">vs {{ sim.away_pitcher or '원정 선발' }}</span>
+            </div>
+            <div class="danger-list">
+              {% for b in vs_ap[:5] %}
+              {% if b.ops %}
+              <div class="danger-row {% if b.ops >= 0.900 %}danger-hot{% elif b.ops >= 0.750 %}danger-warm{% endif %}">
+                <span class="danger-name">{{ b.name }}</span>
+                <span class="danger-ops">OPS {{ "%.3f"|format(b.ops) }}</span>
+              </div>
+              {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+        </div>
+      </section>
+      {% endif %}
 
       <!-- 주요 요인 -->
       {% if sim.factors %}
@@ -118,10 +198,11 @@
 
     </div>
 
-    <!-- 오른쪽: 팀 비교 사이드바 -->
+    <!-- 오른쪽 사이드바 -->
     <aside class="sim-sidebar">
-      <h2 class="sim-section-title">팀 비교</h2>
 
+      <!-- 팀 비교 -->
+      <h2 class="sim-section-title">팀 비교</h2>
       {% if away_stat or home_stat %}
       <table class="compare-table">
         <thead>
@@ -145,11 +226,6 @@
             <td class="{% if away_stat and home_stat and home_stat.win_pct > away_stat.win_pct %}ct-better{% endif %}">
               {{ "%.3f"|format(home_stat.win_pct) if home_stat else '-' }}
             </td>
-          </tr>
-          <tr>
-            <td>승-무-패</td>
-            <td>{% if away_stat %}{{ away_stat.wins }}-{{ away_stat.draws }}-{{ away_stat.losses }}{% else %}-{% endif %}</td>
-            <td>{% if home_stat %}{{ home_stat.wins }}-{{ home_stat.draws }}-{{ home_stat.losses }}{% else %}-{% endif %}</td>
           </tr>
           <tr>
             <td>최근 10경기</td>
@@ -211,9 +287,68 @@
       </table>
       {% endif %}
 
+      <!-- WAR 비교 -->
+      {% set tc = sim.team_comp %}
+      {% if tc and (tc.get('away') or tc.get('home')) %}
+      {% set tc_a = tc.get('away', {}) %}
+      {% set tc_h = tc.get('home', {}) %}
+      {% if tc_a.get('선발WAR') or tc_h.get('선발WAR') %}
+      <div class="war-section">
+        <h3 class="war-title">WAR 비교</h3>
+        <table class="compare-table">
+          <thead>
+            <tr><th>항목</th><th class="ct-away">{{ sim.away_team }}</th><th class="ct-home">{{ sim.home_team }}</th></tr>
+          </thead>
+          <tbody>
+            {% for key in ['선발WAR', '불펜WAR', 'oWAR', 'dWAR'] %}
+            {% set av = tc_a.get(key, '-') %}
+            {% set hv = tc_h.get(key, '-') %}
+            {% if av != '-' or hv != '-' %}
+            <tr>
+              <td>{{ key }}</td>
+              <td class="{% if av != '-' and hv != '-' and av|float > hv|float %}ct-better{% endif %}">{{ av }}</td>
+              <td class="{% if av != '-' and hv != '-' and hv|float > av|float %}ct-better{% endif %}">{{ hv }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+            {% if tc_a.get('팀 평균자책') %}
+            <tr>
+              <td>팀 ERA</td>
+              <td class="{% if tc_a.get('팀 평균자책') and tc_h.get('팀 평균자책') and tc_a['팀 평균자책']|float < tc_h['팀 평균자책']|float %}ct-better{% endif %}">
+                {{ tc_a.get('팀 평균자책', '-') }}
+              </td>
+              <td class="{% if tc_a.get('팀 평균자책') and tc_h.get('팀 평균자책') and tc_h['팀 평균자책']|float < tc_a['팀 평균자책']|float %}ct-better{% endif %}">
+                {{ tc_h.get('팀 평균자책', '-') }}
+              </td>
+            </tr>
+            {% endif %}
+            {% if tc_a.get('팀 OPS') %}
+            <tr>
+              <td>팀 OPS</td>
+              <td class="{% if tc_a.get('팀 OPS') and tc_h.get('팀 OPS') and tc_a['팀 OPS']|float > tc_h['팀 OPS']|float %}ct-better{% endif %}">
+                {{ tc_a.get('팀 OPS', '-') }}
+              </td>
+              <td class="{% if tc_a.get('팀 OPS') and tc_h.get('팀 OPS') and tc_h['팀 OPS']|float > tc_a['팀 OPS']|float %}ct-better{% endif %}">
+                {{ tc_h.get('팀 OPS', '-') }}
+              </td>
+            </tr>
+            {% endif %}
+            {% if tc_a.get('최근 맞대결') %}
+            <tr>
+              <td>최근 맞대결</td>
+              <td>{{ tc_a.get('최근 맞대결', '-') }}</td>
+              <td>{{ tc_h.get('최근 맞대결', '-') }}</td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      {% endif %}
+
       <div class="sim-note">
-        <small>포아송 분포 기반 10,000회 몬테카를로 시뮬레이션.<br>
-        ERA·최근흐름·홈원정전적 반영.</small>
+        <small>포아송 분포 기반 10,000회 몬테카를로.<br>
+        ERA·상대전적·위협타자OPS·홈원정·최근흐름 반영.</small>
       </div>
 
       <a href="{{ url_for('main.index') }}" class="btn-back-home">← 홈으로</a>
@@ -221,4 +356,13 @@
 
   </div>
 </div>
+
+<script>
+function rerunSim() {
+  const btn = document.querySelector('.btn-rerun');
+  btn.disabled = true;
+  btn.textContent = '계산 중…';
+  location.reload();
+}
+</script>
 {% endblock %}

@@ -617,6 +617,101 @@ main.sim-wrap { max-width: 1100px; }
 }
 .btn-back-home:hover { border-color: var(--accent); color: var(--accent); }
 
+/* PITCHER H2H */
+.pitcher-h2h {
+  margin-top: .7rem;
+  padding: .5rem .65rem;
+  background: var(--bg);
+  border-radius: 6px;
+  border-left: 2px solid var(--pending);
+  font-size: .78rem;
+}
+.h2h-label { color: var(--text-muted); margin-bottom: .3rem; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.h2h-stats { display: flex; flex-wrap: wrap; gap: .4rem; }
+.h2h-stats span {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: .15rem .5rem;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--pending);
+}
+
+/* DANGEROUS BATTERS */
+.danger-batters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.danger-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.danger-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem .8rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.danger-team {
+  font-size: .78rem;
+  font-weight: 800;
+  padding: .15rem .55rem;
+  border-radius: 99px;
+}
+.away-tag { background: #1d3a6e; color: #3b82f6; }
+.home-tag { background: #451a03; color: #f59e0b; }
+.danger-subtitle { font-size: .75rem; color: var(--text-muted); }
+.danger-list { padding: .4rem 0; }
+.danger-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .35rem .8rem;
+  font-size: .82rem;
+  border-bottom: 1px solid var(--border);
+}
+.danger-row:last-child { border-bottom: none; }
+.danger-name { font-weight: 600; }
+.danger-ops { font-weight: 700; color: var(--text-muted); font-size: .78rem; }
+.danger-hot .danger-name { color: #ef4444; }
+.danger-hot .danger-ops { color: #ef4444; }
+.danger-warm .danger-name { color: var(--pending); }
+.danger-warm .danger-ops { color: var(--pending); }
+
+/* WAR SECTION */
+.war-section { margin-top: 1.2rem; }
+.war-title {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: .6rem;
+  padding-bottom: .4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* RE-RUN BUTTON */
+.btn-rerun {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: .3rem .75rem;
+  font-size: .82rem;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+  font-family: inherit;
+  margin-left: .5rem;
+}
+.btn-rerun:hover { border-color: var(--accent); color: var(--accent); }
+.btn-rerun:disabled { opacity: .5; cursor: not-allowed; }
+
 @media (max-width: 900px) {
   .home-layout { grid-template-columns: 1fr; }
   .home-sidebar { position: static; }
