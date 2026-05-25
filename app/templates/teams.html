@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}팀 스탯 현황{% endblock %}
+
+{% block content %}
+<div class="teams-header">
+  <h1>팀 스탯 현황</h1>
+  {% if scraped_at %}
+  <span class="scraped-at">마지막 업데이트: {{ scraped_at.strftime('%Y.%m.%d %H:%M') }}</span>
+  {% endif %}
+  <button id="btn-scrape" class="btn-scrape">Statiz 스크래핑</button>
+</div>
+
+{% if standings %}
+<section>
+  <h2>팀 순위</h2>
+  <table class="stats-table">
+    <thead>
+      <tr>
+        <th>순위</th><th>팀</th><th>경기</th><th>승</th><th>무</th><th>패</th>
+        <th>승차</th><th>승률</th><th>경기당 득점</th><th>경기당 실점</th><th>득실차</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in standings %}
+      <tr>
+        <td>{{ t.rank }}</td>
+        <td><strong>{{ t.team }}</strong></td>
+        <td>{{ t.games }}</td>
+        <td>{{ t.wins }}</td>
+        <td>{{ t.draws }}</td>
+        <td>{{ t.losses }}</td>
+        <td>{{ t.gb }}</td>
+        <td>{{ t.win_pct }}</td>
+        <td class="{{ 'correct' if t.runs_per_game >= 5.0 else ('wrong' if t.runs_per_game < 4.0 else '') }}">{{ t.runs_per_game }}</td>
+        <td class="{{ 'wrong' if t.runs_allowed_per_game >= 5.0 else ('correct' if t.runs_allowed_per_game < 4.0 else '') }}">{{ t.runs_allowed_per_game }}</td>
+        <td class="{{ 'correct' if t.run_diff > 0 else 'wrong' }}">{{ '%+d' % t.run_diff }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<p class="empty">아직 스크래핑된 데이터가 없습니다. 오른쪽 위 버튼을 눌러 데이터를 가져오세요.</p>
+{% endif %}
+
+{% if today_games %}
+<section style="margin-top: 2.5rem;">
+  <h2>오늘 경기 선발 투수</h2>
+  <div class="card-grid">
+    {% for g in today_games %}
+    <div class="card" style="cursor:default;">
+      <div class="card-date">{{ g.game_date.strftime('%Y.%m.%d') }}</div>
+      <div class="card-matchup">{{ g.away_team }} <span class="vs">vs</span> {{ g.home_team }}</div>
+      <div style="font-size:.85rem; margin-top:.5rem;">
+        <div style="color:var(--text-muted);">원정 선발: <strong style="color:var(--text);">{{ g.away_pitcher or '미정' }}</strong></div>
+        <div style="color:var(--text-muted);">홈 선발: <strong style="color:var(--text);">{{ g.home_pitcher or '미정' }}</strong></div>
+      </div>
+      {% set s = g.stats %}
+      {% if s.get('away') or s.get('home') %}
+      <details style="margin-top:.8rem; font-size:.82rem;">
+        <summary style="cursor:pointer; color:var(--accent);">선발 스탯 보기</summary>
+        <div style="margin-top:.5rem; display:grid; grid-template-columns:1fr 1fr; gap:.5rem;">
+          {% if s.get('away') %}
+          <div>
+            <div style="font-weight:700; margin-bottom:.3rem;">{{ g.away_pitcher }}</div>
+            {% for k, v in s['away'].items() %}
+            <div style="color:var(--text-muted);">{{ k }}: <span style="color:var(--text);">{{ v }}</span></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if s.get('home') %}
+          <div>
+            <div style="font-weight:700; margin-bottom:.3rem;">{{ g.home_pitcher }}</div>
+            {% for k, v in s['home'].items() %}
+            <div style="color:var(--text-muted);">{{ k }}: <span style="color:var(--text);">{{ v }}</span></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<script>
+document.getElementById('btn-scrape').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-scrape');
+  btn.disabled = true;
+  btn.textContent = '스크래핑 중...';
+  try {
+    const res = await fetch('/admin/scrape', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      alert(`완료! 팀 순위 ${data.standings}개, 오늘 경기 ${data.games}개 저장됨`);
+      location.reload();
+    } else {
+      alert('오류: ' + data.error);
+    }
+  } catch(e) {
+    alert('요청 실패: ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Statiz 스크래핑';
+  }
+});
+</script>
+{% endblock %}

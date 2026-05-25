@@ -213,6 +213,82 @@ h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1rem; }
 .empty { color: var(--text-muted); }
 .empty a { color: var(--accent); }
 
+/* TEAMS PAGE */
+.teams-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.teams-header h1 { margin-bottom: 0; }
+.scraped-at { font-size: .82rem; color: var(--text-muted); }
+.btn-scrape {
+  margin-left: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: .4rem 1rem;
+  cursor: pointer;
+  font-size: .88rem;
+  font-weight: 600;
+}
+.btn-scrape:hover { border-color: var(--accent); }
+.btn-scrape:disabled { opacity: .5; cursor: not-allowed; }
+
+/* TODAY GAMES BAR */
+.today-games-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+  padding: .8rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.tgb-label { font-size: .82rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.tgb-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: .3rem .7rem;
+  font-size: .85rem;
+  cursor: pointer;
+}
+.tgb-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* STAT PREVIEW */
+.stat-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.stat-mini {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .8rem 1rem;
+  font-size: .85rem;
+}
+.stat-mini-title { font-weight: 700; margin-bottom: .4rem; }
+.stat-mini-title span { font-weight: 400; color: var(--text-muted); font-size: .8rem; margin-left: .3rem; }
+.stat-mini-row { display: flex; justify-content: space-between; color: var(--text-muted); padding: .15rem 0; }
+.stat-mini-row span { color: var(--text); }
+
+/* DRAFT BUTTON */
+.btn-draft {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: .35rem .9rem;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-draft:hover { background: var(--accent-soft); }
+.btn-draft:disabled { opacity: .5; cursor: not-allowed; }
+
 /* FOOTER */
 footer { text-align: center; padding: 1.5rem; color: var(--text-muted); font-size: .82rem; border-top: 1px solid var(--border); }
 

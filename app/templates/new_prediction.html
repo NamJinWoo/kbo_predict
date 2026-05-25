@@ -4,24 +4,38 @@
 {% block content %}
 <h1>새 예측 작성</h1>
 
+{% if today_games %}
+<div class="today-games-bar">
+  <span class="tgb-label">오늘 경기</span>
+  {% for g in today_games %}
+  <button type="button" class="tgb-btn"
+    data-away="{{ g.away_team }}" data-home="{{ g.home_team }}"
+    data-away-pitcher="{{ g.away_pitcher }}" data-home-pitcher="{{ g.home_pitcher }}">
+    {{ g.away_team }} vs {{ g.home_team }}
+  </button>
+  {% endfor %}
+</div>
+{% endif %}
+
 <form class="pred-form" method="POST">
   <div class="form-row">
     <label>경기 날짜
-      <input type="date" name="game_date" value="{{ today }}" required />
+      <input type="date" name="game_date" id="game_date" value="{{ today }}" required />
     </label>
   </div>
 
   <div class="form-row two-col">
     <label>원정팀
-      <select name="away_team" required>
-        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+      <select name="away_team" id="away_team" required>
+        {% set kbo_teams = ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+        {% for team in kbo_teams %}
         <option value="{{ team }}">{{ team }}</option>
         {% endfor %}
       </select>
     </label>
     <label>홈팀
-      <select name="home_team" required>
-        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+      <select name="home_team" id="home_team" required>
+        {% for team in kbo_teams %}
         <option value="{{ team }}">{{ team }}</option>
         {% endfor %}
       </select>
@@ -30,23 +44,112 @@
 
   <div class="form-row two-col">
     <label>예측 승리팀
-      <select name="predicted_winner" required>
-        {% for team in ['KIA', 'LG', '두산', 'SSG', '키움', 'NC', '롯데', '삼성', 'KT', '한화'] %}
+      <select name="predicted_winner" id="predicted_winner" required>
+        {% for team in kbo_teams %}
         <option value="{{ team }}">{{ team }}</option>
         {% endfor %}
       </select>
     </label>
     <label>확신도 (%)
-      <input type="number" name="confidence" min="50" max="100" placeholder="예: 65" />
+      <input type="number" name="confidence" id="confidence" min="50" max="100" placeholder="예: 65" />
     </label>
   </div>
 
-  <div class="form-row">
-    <label>분석 내용 (마크다운 지원)
-      <textarea name="analysis" rows="16" placeholder="## 예측 근거&#10;&#10;### 선발 투수&#10;- 홈팀: ...&#10;- 원정팀: ...&#10;&#10;### 최근 전적&#10;..."></textarea>
+  <!-- 팀 스탯 요약 (선택된 팀이 있을 때) -->
+  {% if team_stats %}
+  <div id="stat-preview" class="stat-preview" style="display:none;">
+    <div id="stat-away" class="stat-mini"></div>
+    <div id="stat-home" class="stat-mini"></div>
+  </div>
+  {% endif %}
+
+  <div class="form-row" style="display:flex; align-items:center; gap:.8rem; margin-bottom:.4rem;">
+    <label style="flex:1; flex-direction:row; align-items:center; gap:.5rem;">
+      <span>분석 내용 <span style="font-size:.78rem; color:var(--text-muted);">(마크다운 지원)</span></span>
     </label>
+    <button type="button" id="btn-draft" class="btn-draft">스탯 기반 초안 생성</button>
+  </div>
+  <div class="form-row">
+    <textarea name="analysis" id="analysis" rows="18"
+      placeholder="## 예측 근거&#10;&#10;### 선발 투수&#10;- 홈팀: ...&#10;- 원정팀: ...&#10;&#10;### 최근 전적&#10;..."></textarea>
   </div>
 
   <button type="submit" class="btn-submit">예측 저장</button>
 </form>
+
+{% if team_stats %}
+<script>
+const teamStats = {{ team_stats | tojson }};
+</script>
+{% endif %}
+
+<script>
+// 오늘 경기 버튼 클릭 시 팀 자동 선택
+document.querySelectorAll('.tgb-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const away = btn.dataset.away;
+    const home = btn.dataset.home;
+    setSelect('away_team', away);
+    setSelect('home_team', home);
+    setSelect('predicted_winner', away);
+    updateStatPreview(away, home);
+  });
+});
+
+function setSelect(id, val) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  for (let opt of sel.options) {
+    if (opt.value === val) { opt.selected = true; break; }
+  }
+}
+
+function updateStatPreview(away, home) {
+  const preview = document.getElementById('stat-preview');
+  if (!preview) return;
+  const stats = window.teamStats || {};
+  const av = stats[away], hv = stats[home];
+  if (!av && !hv) { preview.style.display = 'none'; return; }
+  preview.style.display = 'grid';
+  if (av) document.getElementById('stat-away').innerHTML = buildStatMini(away, av, '원정');
+  if (hv) document.getElementById('stat-home').innerHTML = buildStatMini(home, hv, '홈');
+}
+
+function buildStatMini(team, s, label) {
+  return `<div class="stat-mini-title">${team} <span>${label}</span></div>
+    <div class="stat-mini-row"><span>${s.rank}위</span><span>승률 ${s.win_pct}</span></div>
+    <div class="stat-mini-row"><span>${s.wins}승 ${s.draws}무 ${s.losses}패</span><span>득실 ${s.run_diff > 0 ? '+' : ''}${s.run_diff}</span></div>
+    <div class="stat-mini-row"><span>경기당 득점 ${s.runs_per_game}</span><span>경기당 실점 ${s.runs_allowed_per_game}</span></div>`;
+}
+
+// 팀 선택 변경 시 preview 업데이트
+['away_team', 'home_team'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => {
+    const away = document.getElementById('away_team').value;
+    const home = document.getElementById('home_team').value;
+    updateStatPreview(away, home);
+  });
+});
+
+// 스탯 기반 초안 생성
+document.getElementById('btn-draft').addEventListener('click', async () => {
+  const away = document.getElementById('away_team').value;
+  const home = document.getElementById('home_team').value;
+  const gameDate = document.getElementById('game_date').value;
+  const btn = document.getElementById('btn-draft');
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+  try {
+    const res = await fetch(`/api/draft?away=${encodeURIComponent(away)}&home=${encodeURIComponent(home)}&date=${gameDate}`);
+    const data = await res.json();
+    document.getElementById('analysis').value = data.draft;
+  } catch(e) {
+    alert('초안 생성 실패: ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '스탯 기반 초안 생성';
+  }
+});
+</script>
 {% endblock %}
