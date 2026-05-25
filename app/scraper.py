@@ -210,13 +210,14 @@ def scrape_kbo_teamrank() -> list[dict]:
     return results
 
 
-def scrape_recent_results(target_date: date) -> list[dict]:
-    """statiz ?page=game 페이지에서 완료된 경기 결과 파싱 (W/L/S)"""
-    date_str = target_date.strftime("%Y%m%d")
-    resp = requests.get(
-        f"https://statiz.co.kr/?page=game&date={date_str}",
-        headers=HEADERS, timeout=10
-    )
+def _parse_game_page() -> tuple:
+    """
+    statiz ?page=game 한 번 요청으로 완료경기 + 예정경기 동시 파싱.
+    반환: (recent_list, upcoming_list)
+    - 완료경기: span에서 실제 날짜(MM.DD) 추출
+    - 예정경기: span에서 구장명 추출, 날짜는 완료경기 날 기준 추론
+    """
+    resp = requests.get("https://statiz.co.kr/?page=game", headers=HEADERS, timeout=10)
     resp.raise_for_status()
     html = resp.text
 
@@ -224,106 +225,98 @@ def scrape_recent_results(target_date: date) -> list[dict]:
         r'<div class="vsbox">(.*?)</div>\s*<div class="v_info">(.*?)</div>',
         html, re.DOTALL
     )
-    results = []
+
+    today = date.today()
+    recent = []
+    upcoming = []
+    completed_date = None  # 완료경기의 실제 날짜
+
     for vsbox, vinfo in blocks:
         vclean = re.sub(r'&nbsp;', ' ', re.sub(r'<[^>]+>', '', vinfo)).strip()
-        # 완료된 경기만 (W 가 있는 경우)
-        if not re.search(r'\bW\b', vclean):
-            continue
+        span_m = re.search(r'<span[^>]*>(.*?)</span>', vsbox, re.DOTALL)
+        span_text = re.sub(r'<[^>]+>', '', span_m.group(1)).strip() if span_m else ''
 
-        p_tags = re.findall(r'<p[^>]*>(.*?)</p>', vsbox, re.DOTALL)
-        if len(p_tags) < 2:
-            continue
-        away_text = re.sub(r'<[^>]+>', '', p_tags[0]).strip()
-        home_text = re.sub(r'<[^>]+>', '', p_tags[1]).strip()
+        # ── 완료경기: span = MM.DD, vinfo에 W 포함 ──
+        if re.search(r'\bW\b', vclean):
+            p_tags = re.findall(r'<p[^>]*>(.*?)</p>', vsbox, re.DOTALL)
+            if len(p_tags) < 2:
+                continue
+            away_text = re.sub(r'<[^>]+>', '', p_tags[0]).strip()
+            home_text = re.sub(r'<[^>]+>', '', p_tags[1]).strip()
+            away_m = re.match(r'(.+?)\s+(\d+)$', away_text)
+            home_m = re.match(r'^(\d+)\s+(.+)', home_text)
+            if not away_m or not home_m:
+                continue
 
-        # away_text: "팀명 점수"  home_text: "점수 팀명"
-        away_m = re.match(r'(.+?)\s+(\d+)$', away_text)
-        home_m = re.match(r'^(\d+)\s+(.+)', home_text)
-        if not away_m or not home_m:
-            continue
+            # span에서 실제 날짜 추출 (MM.DD)
+            date_span = re.match(r'(\d{2})\.(\d{2})', span_text)
+            if date_span:
+                mm, dd = int(date_span.group(1)), int(date_span.group(2))
+                game_date = date(today.year, mm, dd)
+                completed_date = game_date
+            else:
+                game_date = today - timedelta(days=1)
+                completed_date = game_date
 
-        away_team  = away_m.group(1).strip()
-        away_score = int(away_m.group(2))
-        home_score = int(home_m.group(1))
-        home_team  = home_m.group(2).strip()
+            def _pick(tag):
+                m = re.search(rf'\b{tag}\b\s+([^\s정보]+)', vclean)
+                return m.group(1) if m else ""
 
-        def _pick(tag):
-            m = re.search(rf'\b{tag}\b\s+([^\s정보]+)', vclean)
-            return m.group(1) if m else ""
+            recent.append({
+                "game_date":    game_date,
+                "away_team":    away_m.group(1).strip(),
+                "home_team":    home_m.group(2).strip(),
+                "away_score":   int(away_m.group(2)),
+                "home_score":   int(home_m.group(1)),
+                "win_pitcher":  _pick("W"),
+                "lose_pitcher": _pick("L"),
+                "save_pitcher": _pick("S"),
+                "hold_pitcher": _pick("H"),
+                "stadium":      STADIUM_MAP.get(home_m.group(2).strip(), ""),
+            })
 
-        results.append({
-            "game_date":    target_date,
-            "away_team":    away_team,
-            "home_team":    home_team,
-            "away_score":   away_score,
-            "home_score":   home_score,
-            "win_pitcher":  _pick("W"),
-            "lose_pitcher": _pick("L"),
-            "save_pitcher": _pick("S"),
-            "hold_pitcher": _pick("H"),
-            "stadium":      STADIUM_MAP.get(home_team, ""),
-        })
-    return results
+        # ── 예정경기: span = 구장명, vinfo에 시간 포함 ──
+        elif re.search(r'\d{2}:\d{2}', vclean):
+            team_links = re.findall(
+                r'<a href="[^"]*t_code=(\d+)[^"]*"[^>]*>(.*?)</a>',
+                vsbox, re.DOTALL
+            )
+            if len(team_links) < 2:
+                continue
+            away_team = re.sub(r'\s+', '', _clean(team_links[0][1]))
+            home_team = re.sub(r'\s+', '', _clean(team_links[1][1]))
+            stadium   = span_text if span_text else STADIUM_MAP.get(home_team, '')
+
+            upcoming.append({
+                "away_team":    away_team,
+                "home_team":    home_team,
+                "away_pitcher": "",
+                "home_pitcher": "",
+                "stadium":      stadium,
+                "stats":        {},
+            })
+
+    # 예정경기 날짜 추론: 완료경기 날짜가 오늘이면 다음경기는 내일, 아니면 오늘
+    if completed_date is not None:
+        upcoming_date = today + timedelta(days=1) if completed_date >= today else today
+    else:
+        upcoming_date = today
+    for g in upcoming:
+        g["game_date"] = upcoming_date
+
+    return recent, upcoming
 
 
-def scrape_upcoming_by_date(target_date: date) -> list[dict]:
-    """statiz prediction 페이지에서 특정 날짜 예정 경기 + 선발 투수 파싱"""
-    date_str = target_date.strftime("%Y%m%d")
-    resp = requests.get(
-        f"https://statiz.co.kr/prediction/?m=main&date={date_str}",
-        headers=HEADERS, timeout=10
-    )
-    resp.raise_for_status()
-    html = resp.text
+def scrape_recent_results() -> list[dict]:
+    """최근 완료 경기 결과 반환"""
+    recent, _ = _parse_game_page()
+    return recent
 
-    # game_date 파싱
-    date_m = re.search(r'class="day"[^>]*>\s*(\d{4}\.\d{2}\.\d{2})', html)
-    game_date = target_date
-    if date_m:
-        try:
-            game_date = datetime.strptime(date_m.group(1), "%Y.%m.%d").date()
-        except ValueError:
-            pass
 
-    pitcher_names = re.findall(r'<div class="name">(.*?)</div>', html)
-    record_blocks = re.findall(
-        r'<ul>\s*(<li class="value">.*?</ul>)\s*<ul>\s*(<li class="value">.*?</ul>)',
-        html, re.DOTALL
-    )
-    team_blocks = re.findall(
-        r'<div class="t_name">\s*<a href="[^"]*t_code=(\d+)[^"]*"[^>]*>(.*?)</a>',
-        html, re.DOTALL
-    )
-
-    games = []
-    i = 0
-    pitcher_idx = 0
-    while i + 1 < len(team_blocks):
-        away_code, away_raw = team_blocks[i]
-        home_code, home_raw = team_blocks[i + 1]
-        away_team = re.sub(r"\s+", "", _clean(away_raw))
-        home_team = re.sub(r"\s+", "", _clean(home_raw))
-
-        game = {
-            "game_date":    game_date,
-            "away_team":    away_team,
-            "home_team":    home_team,
-            "away_pitcher": pitcher_names[pitcher_idx]     if pitcher_idx     < len(pitcher_names) else "",
-            "home_pitcher": pitcher_names[pitcher_idx + 1] if pitcher_idx + 1 < len(pitcher_names) else "",
-            "stadium":      STADIUM_MAP.get(home_team, ""),
-            "stats":        {},
-        }
-        if pitcher_idx // 2 < len(record_blocks):
-            aw_vals, hm_vals = record_blocks[pitcher_idx // 2]
-            game["stats"]["away"] = _parse_pitcher_stats(aw_vals)
-            game["stats"]["home"] = _parse_pitcher_stats(hm_vals)
-
-        games.append(game)
-        i += 2
-        pitcher_idx += 2
-
-    return games
+def scrape_upcoming_games() -> list[dict]:
+    """다음 예정 경기 목록 반환"""
+    _, upcoming = _parse_game_page()
+    return upcoming
 
 
 def scrape_all() -> dict:
@@ -341,39 +334,15 @@ def scrape_all() -> dict:
             "away_record": k.get("away_record", ""),
         }})
 
-    # 최근 완료 경기 결과: 오늘부터 최대 3일 전까지 역순 탐색
-    recent_results = []
-    recent_date = None
-    for delta in range(0, 4):
-        check = date.today() - timedelta(days=delta)
-        try:
-            found = scrape_recent_results(check)
-        except Exception:
-            found = []
-        if found:
-            recent_results = found
-            recent_date = check
-            break
-
-    # 다음 예정 경기: 오늘부터 최대 3일 후까지 탐색
-    upcoming = []
-    upcoming_date = None
-    for delta in range(0, 4):
-        check = date.today() + timedelta(days=delta)
-        try:
-            found = scrape_upcoming_by_date(check)
-        except Exception:
-            found = []
-        if found:
-            upcoming = found
-            upcoming_date = check
-            break
+    # 최근 완료 경기 + 다음 예정 경기 (한 번에)
+    try:
+        recent_results, upcoming = _parse_game_page()
+    except Exception:
+        recent_results, upcoming = [], []
 
     return {
         "scraped_at":     datetime.utcnow().isoformat(),
         "standings":      merged,
-        "today_games":    upcoming,       # TodayGame 저장용 (기존 키 유지)
+        "today_games":    upcoming,
         "recent_results": recent_results,
-        "recent_date":    recent_date,
-        "upcoming_date":  upcoming_date,
     }

@@ -231,6 +231,11 @@ def admin_scrape():
     try:
         from app.scraper import scrape_all
         data = scrape_all()
+
+        # 갱신 전 기존 데이터 초기화 (누적 방지)
+        RecentGame.query.delete()
+        TodayGame.query.delete()
+
         standings = data["standings"]
         for s in standings:
             ts = TeamStat(
