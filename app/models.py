@@ -1,12 +1,13 @@
 from app import db
 from datetime import datetime
+from sqlalchemy import Index
 import json
 
 
 class TeamStat(db.Model):
     """statiz + KBO 공식 사이트에서 스크래핑한 팀 순위/스탯 스냅샷"""
     id = db.Column(db.Integer, primary_key=True)
-    scraped_at = db.Column(db.DateTime, default=datetime.utcnow)
+    scraped_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     team = db.Column(db.String(20), nullable=False)
     team_code = db.Column(db.String(10))
     rank = db.Column(db.Integer)
@@ -16,14 +17,17 @@ class TeamStat(db.Model):
     losses = db.Column(db.Integer)
     gb = db.Column(db.Float)
     win_pct = db.Column(db.Float)
-    # statiz 제공
     runs_scored = db.Column(db.Integer)
     runs_allowed = db.Column(db.Integer)
-    # KBO 공식 제공
-    last10 = db.Column(db.String(20))    # 최근 10경기: "6승0무4패"
-    streak = db.Column(db.String(10))    # 연속: "3승", "7패"
-    home_record = db.Column(db.String(20))   # "14-1-9"
-    away_record = db.Column(db.String(20))   # "14-0-9"
+    last10 = db.Column(db.String(20))
+    streak = db.Column(db.String(10))
+    home_record = db.Column(db.String(20))
+    away_record = db.Column(db.String(20))
+
+    __table_args__ = (
+        Index("ix_team_stat_scraped_at",   "scraped_at"),
+        Index("ix_team_stat_scraped_rank", "scraped_at", "rank"),
+    )
 
     @property
     def run_diff(self):
@@ -39,7 +43,6 @@ class TeamStat(db.Model):
 
     @property
     def streak_num(self):
-        """연속 숫자 추출 (양수=승, 음수=패)"""
         if not self.streak:
             return 0
         import re
@@ -54,15 +57,20 @@ class TeamStat(db.Model):
 
 
 class TodayGame(db.Model):
-    """오늘 경기 + 선발 투수 스탯 스냅샷"""
+    """예정 경기 + 선발 투수 스냅샷"""
     id = db.Column(db.Integer, primary_key=True)
-    scraped_at = db.Column(db.DateTime, default=datetime.utcnow)
+    scraped_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     game_date = db.Column(db.Date, nullable=False)
     away_team = db.Column(db.String(20))
     home_team = db.Column(db.String(20))
     away_pitcher = db.Column(db.String(30))
     home_pitcher = db.Column(db.String(30))
-    stats_json = db.Column(db.Text)   # {"away": {...}, "home": {...}}
+    stats_json = db.Column(db.Text)
+
+    __table_args__ = (
+        Index("ix_today_game_date",     "game_date"),
+        Index("ix_today_game_date_scr", "game_date", "scraped_at"),
+    )
 
     @property
     def stats(self):
@@ -75,7 +83,7 @@ class TodayGame(db.Model):
 class RecentGame(db.Model):
     """완료된 경기 결과 (승리투수, 세이브 포함)"""
     id = db.Column(db.Integer, primary_key=True)
-    scraped_at = db.Column(db.DateTime, default=datetime.utcnow)
+    scraped_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     game_date = db.Column(db.Date, nullable=False)
     away_team = db.Column(db.String(20))
     home_team = db.Column(db.String(20))
@@ -86,6 +94,10 @@ class RecentGame(db.Model):
     save_pitcher = db.Column(db.String(30))
     hold_pitcher = db.Column(db.String(30))
     stadium = db.Column(db.String(40))
+
+    __table_args__ = (
+        Index("ix_recent_game_date", "game_date"),
+    )
 
     @property
     def winner(self):
@@ -103,10 +115,15 @@ class Prediction(db.Model):
     home_team = db.Column(db.String(20), nullable=False)
     away_team = db.Column(db.String(20), nullable=False)
     predicted_winner = db.Column(db.String(20), nullable=False)
-    confidence = db.Column(db.Integer)          # 0~100 확신도
-    analysis = db.Column(db.Text)               # 마크다운 분석 본문
-    actual_winner = db.Column(db.String(20))    # 실제 결과 (경기 후 입력)
+    confidence = db.Column(db.Integer)
+    analysis = db.Column(db.Text)
+    actual_winner = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_prediction_date",   "game_date"),
+        Index("ix_prediction_actual", "actual_winner"),
+    )
 
     @property
     def is_correct(self):
