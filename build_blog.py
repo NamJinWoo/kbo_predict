@@ -227,6 +227,78 @@ a { color: inherit; text-decoration: none; }
 .update-info {
   text-align: center; padding: 16px; font-size: 0.72rem; color: #334155;
 }
+
+/* ── 박스스코어 ── */
+.bs-toggle {
+  width: 100%; padding: 12px 16px;
+  background: none; border: none; border-top: 1px solid #334155;
+  color: #94a3b8; font-size: 0.82rem; font-weight: 600;
+  text-align: left; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.bs-body { display: none; }
+.bs-body.open { display: block; }
+
+.bs-sp {
+  padding: 10px 16px; border-top: 1px solid #1e293b;
+  font-size: 0.72rem; color: #94a3b8; line-height: 1.8;
+}
+.bs-sp strong { color: #cbd5e1; }
+
+.bs-team-header {
+  padding: 8px 16px 4px; font-size: 0.75rem; font-weight: 700; color: #64748b;
+  border-top: 1px solid #1e293b; margin-top: 4px;
+}
+.bs-table-wrap { overflow-x: auto; padding: 0 16px 12px; }
+.bs-table {
+  border-collapse: collapse; width: 100%; font-size: 0.72rem;
+  white-space: nowrap;
+}
+.bs-table th {
+  background: #0f172a; color: #64748b; font-weight: 600;
+  padding: 5px 8px; text-align: center; border-bottom: 1px solid #334155;
+  position: sticky; top: 0;
+}
+.bs-table td {
+  padding: 4px 8px; text-align: center; border-bottom: 1px solid #1e293b;
+  color: #cbd5e1;
+}
+.bs-table .td-name { text-align: left; font-weight: 600; color: #e2e8f0; min-width: 60px; }
+.bs-table .td-pos  { color: #64748b; }
+.bs-table .td-hi   { color: #fbbf24; font-weight: 700; }
+.bs-table .td-win  { color: #4ade80; font-weight: 700; }
+.bs-table .td-lose { color: #f87171; font-weight: 700; }
+.bs-table .td-save { color: #60a5fa; font-weight: 700; }
+.bs-table .td-hold { color: #c084fc; font-weight: 700; }
+.bs-table tr.sub-row td { color: #475569; }
+.bs-table tfoot td  { background: #0f172a; color: #94a3b8; font-weight: 600; }
+
+/* ── 소개 탭 ── */
+.intro-body {
+  padding: 16px; font-size: 0.84rem; line-height: 1.8; color: #cbd5e1;
+}
+.intro-body h1 { font-size: 1.1rem; font-weight: 800; color: #f1f5f9; margin: 16px 0 8px; }
+.intro-body h2 { font-size: 0.95rem; font-weight: 700; color: #93c5fd; margin: 16px 0 6px; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }
+.intro-body h3 { font-size: 0.85rem; font-weight: 700; color: #7dd3fc; margin: 12px 0 4px; }
+.intro-body h4 { font-size: 0.82rem; font-weight: 700; color: #94a3b8; margin: 10px 0 4px; }
+.intro-body p  { margin-bottom: 8px; }
+.intro-body ul, .intro-body ol { padding-left: 18px; margin-bottom: 8px; }
+.intro-body li { margin-bottom: 3px; }
+.intro-body code {
+  background: #0f172a; padding: 1px 5px; border-radius: 4px;
+  font-size: 0.78rem; color: #7dd3fc; font-family: monospace;
+}
+.intro-body pre {
+  background: #0f172a; border-radius: 8px; padding: 12px 14px;
+  overflow-x: auto; margin: 8px 0; border: 1px solid #1e293b;
+}
+.intro-body pre code { background: none; padding: 0; color: #a5f3fc; }
+.intro-body table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.78rem; }
+.intro-body th { background: #1e293b; color: #94a3b8; padding: 6px 10px; text-align: left; border: 1px solid #334155; }
+.intro-body td { padding: 5px 10px; border: 1px solid #1e293b; }
+.intro-body hr { border: none; border-top: 1px solid #1e293b; margin: 16px 0; }
+.intro-body strong { color: #e2e8f0; }
+.intro-body a { color: #60a5fa; text-decoration: underline; }
 """
 
 
@@ -321,7 +393,110 @@ function toggleAnalysis(i) {{
 </script>"""
 
 
-def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str, idx: int) -> str:
+def _boxscore_html(bs: dict, away_team: str, home_team: str, idx: int) -> str:
+    """박스스코어 아코디언 HTML 생성"""
+    if not bs or bs.get("cancel"):
+        return ""
+
+    def _result_cls(val: str) -> str:
+        return {"승": "td-win", "패": "td-lose", "세": "td-save", "홀": "td-hold"}.get(val, "")
+
+    def _bat_table(team: str, bat: dict) -> str:
+        if not bat or not bat.get("rows"):
+            return ""
+        hdrs = bat.get("headers", [])
+        stat_cols = {"안타", "타점", "득점"}
+        prev_order = ""
+        rows_html = ""
+        for row in bat.get("rows", []):
+            is_sub = prev_order and len(row) > 0 and row[0] == prev_order
+            tr_cls = ' class="sub-row"' if is_sub else ""
+            if row:
+                prev_order = row[0]
+            cells = ""
+            for ci, cell in enumerate(row):
+                hdr = hdrs[ci] if ci < len(hdrs) else ""
+                hi_cls = " td-hi" if hdr in stat_cols and cell and cell != "0" else ""
+                name_cls = " td-name" if hdr == "선수명" else ""
+                pos_cls  = " td-pos"  if ci == 1 and hdr == "" else ""
+                cells += f'<td class="{(hi_cls+name_cls+pos_cls).strip()}">{cell or ""}</td>'
+            rows_html += f"<tr{tr_cls}>{cells}</tr>"
+        tfoot_html = ""
+        for row in bat.get("tfoot", []):
+            tfoot_html += "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
+        thead = "".join(f"<th>{h}</th>" for h in hdrs)
+        return f"""
+<div class="bs-team-header">{team} 타자</div>
+<div class="bs-table-wrap">
+  <table class="bs-table">
+    <thead><tr>{thead}</tr></thead>
+    <tbody>{rows_html}</tbody>
+    {'<tfoot>'+tfoot_html+'</tfoot>' if tfoot_html else ''}
+  </table>
+</div>"""
+
+    def _pit_table(team: str, pit: dict) -> str:
+        if not pit or not pit.get("rows"):
+            return ""
+        hdrs = pit.get("headers", [])
+        rows_html = ""
+        for row in pit.get("rows", []):
+            cells = ""
+            for ci, cell in enumerate(row):
+                hdr = hdrs[ci] if ci < len(hdrs) else ""
+                cls = _result_cls(cell) if hdr == "결과" else ("td-name" if ci == 0 else "")
+                cells += f'<td class="{cls}">{cell or "—"}</td>'
+            rows_html += f"<tr>{cells}</tr>"
+        tfoot_html = ""
+        for row in pit.get("tfoot", []):
+            tfoot_html += "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
+        thead = "".join(f"<th>{h}</th>" for h in hdrs)
+        return f"""
+<div class="bs-team-header">{team} 투수</div>
+<div class="bs-table-wrap">
+  <table class="bs-table">
+    <thead><tr>{thead}</tr></thead>
+    <tbody>{rows_html}</tbody>
+    {'<tfoot>'+tfoot_html+'</tfoot>' if tfoot_html else ''}
+  </table>
+</div>"""
+
+    # 특이사항
+    sp = bs.get("special_plays", {})
+    sp_html = ""
+    if sp:
+        sp_rows = " &nbsp;|&nbsp; ".join(f"<strong>{k}</strong> {v}" for k, v in sp.items())
+        sp_html = f'<div class="bs-sp">{sp_rows}</div>'
+
+    inner = (
+        sp_html
+        + _bat_table(away_team, bs.get("away_batters"))
+        + _bat_table(home_team, bs.get("home_batters"))
+        + _pit_table(away_team, bs.get("away_pitchers"))
+        + _pit_table(home_team, bs.get("home_pitchers"))
+    )
+    if not inner.strip():
+        return ""
+
+    bid = f"bs-{idx}"
+    return f"""
+<button class="bs-toggle" onclick="toggleBS('{bid}')">
+  경기 결과 상세 <span id="{bid}-arr">▼</span>
+</button>
+<div class="bs-body" id="{bid}">
+  {inner}
+</div>
+<script>
+function toggleBS(id) {{
+  var el=document.getElementById(id), arr=document.getElementById(id+'-arr');
+  if(el.classList.contains('open')){{el.classList.remove('open');arr.textContent='▼';}}
+  else{{el.classList.add('open');arr.textContent='▲';}}
+}}
+</script>"""
+
+
+def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
+                         boxscore_html: str, idx: int) -> str:
     away_score = rg.away_score or 0
     home_score = rg.home_score or 0
     away_win_cls = " winner" if away_score > home_score else ""
@@ -371,6 +546,7 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str, idx: i
   {_prob_bar(away_pct, rg.away_team, rg.home_team)}
   {_danger_html(sim)}
   {_analysis_accordion(analysis_html, idx)}
+  {boxscore_html}
 </div>"""
 
 
@@ -438,6 +614,7 @@ def build_upcoming_card(tg: "TodayGame", sim: dict, analysis_html: str, idx: int
 # ── 페이지 생성 ───────────────────────────────────────────────────
 
 def build_completed_page(game_date: date, games: list, team_stats: dict) -> str:
+    from app.scraper import scrape_game_boxscore
     date_str   = game_date.strftime("%Y년 %-m월 %-d일")
     cards_html = ""
 
@@ -447,7 +624,12 @@ def build_completed_page(game_date: date, games: list, team_stats: dict) -> str:
         sim  = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
         ana  = generate_analysis(sim, away_stat, home_stat)
         ana_html = md_lib.markdown(ana, extensions=["extra", "nl2br"])
-        cards_html += build_completed_card(rg, sim, ana_html, idx)
+        try:
+            bs = scrape_game_boxscore(rg.game_date, rg.away_team, rg.home_team)
+        except Exception:
+            bs = {}
+        bs_html = _boxscore_html(bs, rg.away_team, rg.home_team, idx)
+        cards_html += build_completed_card(rg, sim, ana_html, bs_html, idx)
 
     body = f"""
 <div class="site-header">
@@ -485,6 +667,15 @@ def build_prediction_page(game_date: date, games: list, team_stats: dict) -> str
     return _html_page(f"KBO {date_str} 경기 예상", body)
 
 
+def _readme_to_html() -> str:
+    readme_path = Path(__file__).parent / "README.md"
+    try:
+        raw = readme_path.read_text(encoding="utf-8")
+        return md_lib.markdown(raw, extensions=["extra", "tables", "nl2br"])
+    except Exception:
+        return "<p>소개 내용을 불러올 수 없습니다.</p>"
+
+
 def build_index(completed_dates: list, upcoming_dates: list,
                 completed_counts: dict, upcoming_counts: dict) -> str:
     weekdays = ["월","화","수","목","금","토","일"]
@@ -518,7 +709,8 @@ def build_index(completed_dates: list, upcoming_dates: list,
         for d in upcoming_dates
     ) or '<div class="empty-state"><div class="es-icon">📭</div><div class="es-text">예정된 경기가 없습니다</div></div>'
 
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    now_str    = datetime.now().strftime('%Y-%m-%d %H:%M')
+    readme_html = _readme_to_html()
 
     body = f"""
 <div class="site-header">
@@ -529,6 +721,7 @@ def build_index(completed_dates: list, upcoming_dates: list,
 <div class="tab-bar">
   <button class="tab-btn active" onclick="switchTab('games', this)">오늘 경기 분석</button>
   <button class="tab-btn"        onclick="switchTab('preds', this)">다음 경기 예상</button>
+  <button class="tab-btn"        onclick="switchTab('intro', this)">소개</button>
 </div>
 
 <div class="tab-panel active" id="tab-games">
@@ -536,6 +729,9 @@ def build_index(completed_dates: list, upcoming_dates: list,
 </div>
 <div class="tab-panel" id="tab-preds">
   <div class="date-list">{pred_list}</div>
+</div>
+<div class="tab-panel" id="tab-intro">
+  <div class="intro-body">{readme_html}</div>
 </div>
 
 <div class="update-info">빌드: {now_str}</div>
@@ -547,11 +743,11 @@ function switchTab(name, btn) {{
   btn.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
 }}
-// URL hash로 탭 복원
 (function() {{
   var h = location.hash;
-  if (h === '#preds') {{
-    switchTab('preds', document.querySelectorAll('.tab-btn')[1]);
+  var map = {{'#preds': 1, '#intro': 2}};
+  if (map[h] !== undefined) {{
+    switchTab(h.slice(1), document.querySelectorAll('.tab-btn')[map[h]]);
   }}
 }})();
 </script>"""
