@@ -271,13 +271,13 @@ def _parse_game_page() -> tuple:
             if date_span:
                 mm, dd = int(date_span.group(1)), int(date_span.group(2))
                 game_date = date(today.year, mm, dd)
-                completed_date = game_date
             else:
                 game_date = today - timedelta(days=1)
+            if completed_date is None or game_date > completed_date:
                 completed_date = game_date
 
             def _pick(tag):
-                m = re.search(rf'\b{tag}\b\s+([^\s정보]+)', vclean)
+                m = re.search(rf'\b{tag}\b\s+(\S+)', vclean)
                 return m.group(1) if m else ""
 
             recent.append({
@@ -402,8 +402,8 @@ def _parse_prediction_full_stats(html: str) -> dict:
             team_comp_home[lbl] = hv
 
     # ── 위험 타자 (player_box hitter) ──
-    # Block 0 = home team batters vs away pitcher (홈 타자 vs 원정 선발)
-    # Block 1 = away team batters vs home pitcher (원정 타자 vs 홈 선발)
+    # Block 0 = away team batters vs home pitcher (원정 타자 vs 홈 선발)
+    # Block 1 = home team batters vs away pitcher (홈 타자 vs 원정 선발)
     pb_hitter_blocks = re.findall(
         r'<div class="player_box hitter">(.*?)(?=<div class="player_box hitter"|</section>)',
         html, re.DOTALL
@@ -411,8 +411,6 @@ def _parse_prediction_full_stats(html: str) -> dict:
 
     def _parse_batters(section: str) -> list[dict]:
         batters = []
-        p_inners = re.findall(r'<div class="p_inner[^"]*">(.*?)</div>\s*</div>\s*</div>', section, re.DOTALL)
-        items = re.findall(r'<div class="item">(.*?)</div>\s*</div>\s*</div>', section, re.DOTALL)
         name_blocks = re.findall(
             r'</a>\s*<div class="name">(.*?)</div>\s*<div class="name">OPS\s*:\s*([\d.]+)</div>',
             section, re.DOTALL
@@ -427,8 +425,8 @@ def _parse_prediction_full_stats(html: str) -> dict:
                 batters.append({"name": name, "ops": ops})
         return batters
 
-    vs_away_pitcher = _parse_batters(pb_hitter_blocks[0]) if len(pb_hitter_blocks) > 0 else []
-    vs_home_pitcher = _parse_batters(pb_hitter_blocks[1]) if len(pb_hitter_blocks) > 1 else []
+    vs_home_pitcher = _parse_batters(pb_hitter_blocks[0]) if len(pb_hitter_blocks) > 0 else []
+    vs_away_pitcher = _parse_batters(pb_hitter_blocks[1]) if len(pb_hitter_blocks) > 1 else []
 
     return {
         "away": away_stats,
