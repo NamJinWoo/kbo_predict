@@ -370,12 +370,12 @@ def _danger_html(sim: dict) -> str:
     return rows
 
 
-def _analysis_accordion(analysis_html: str, idx: int) -> str:
+def _analysis_accordion(analysis_html: str, idx: int, label: str = "경기 분석 보기") -> str:
     if not analysis_html:
         return ""
     return f"""
 <button class="analysis-toggle" onclick="toggleAnalysis({idx})">
-  경기 분석 보기 <span id="arr-{idx}">▼</span>
+  {label} <span id="arr-{idx}">▼</span>
 </button>
 <div class="analysis-body" id="ab-{idx}">
   {analysis_html}
@@ -405,26 +405,41 @@ def _boxscore_html(bs: dict, away_team: str, home_team: str, idx: int) -> str:
         if not bat or not bat.get("rows"):
             return ""
         hdrs = bat.get("headers", [])
-        stat_cols = {"안타", "타점", "득점"}
+
+        STAT_COLS = {"타수", "안타", "타점", "득점", "타율"}
+        HI_COLS   = {"안타", "타점", "득점"}
+
+        # 컬럼 그룹 분류: 접두(타순·포지션·선수명) → 스탯 → 이닝
+        prefix_idx = [i for i, h in enumerate(hdrs) if not h.isdigit() and h not in STAT_COLS]
+        stat_idx   = [i for i, h in enumerate(hdrs) if h in STAT_COLS]
+        inn_idx    = [i for i, h in enumerate(hdrs) if h.isdigit()]
+        col_order  = prefix_idx + stat_idx + inn_idx
+        new_hdrs   = [hdrs[i] for i in col_order]
+
         prev_order = ""
-        rows_html = ""
+        rows_html  = ""
         for row in bat.get("rows", []):
             is_sub = prev_order and len(row) > 0 and row[0] == prev_order
             tr_cls = ' class="sub-row"' if is_sub else ""
             if row:
                 prev_order = row[0]
             cells = ""
-            for ci, cell in enumerate(row):
-                hdr = hdrs[ci] if ci < len(hdrs) else ""
-                hi_cls = " td-hi" if hdr in stat_cols and cell and cell != "0" else ""
+            for new_ci, orig_ci in enumerate(col_order):
+                cell = row[orig_ci] if orig_ci < len(row) else ""
+                hdr  = hdrs[orig_ci] if orig_ci < len(hdrs) else ""
+                hi_cls   = " td-hi"   if hdr in HI_COLS and cell and cell != "0" else ""
                 name_cls = " td-name" if hdr == "선수명" else ""
-                pos_cls  = " td-pos"  if ci == 1 and hdr == "" else ""
+                pos_cls  = " td-pos"  if orig_ci == 1 and hdr == "" else ""
                 cells += f'<td class="{(hi_cls+name_cls+pos_cls).strip()}">{cell or ""}</td>'
             rows_html += f"<tr{tr_cls}>{cells}</tr>"
+
         tfoot_html = ""
         for row in bat.get("tfoot", []):
-            tfoot_html += "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>"
-        thead = "".join(f"<th>{h}</th>" for h in hdrs)
+            # tfoot도 같은 col_order로 재배열
+            reordered = [row[i] if i < len(row) else "" for i in col_order]
+            tfoot_html += "<tr>" + "".join(f"<td>{c}</td>" for c in reordered) + "</tr>"
+
+        thead = "".join(f"<th>{h}</th>" for h in new_hdrs)
         return f"""
 <div class="bs-team-header">{team} 타자</div>
 <div class="bs-table-wrap">
@@ -545,7 +560,7 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
   {pit_html}
   {_prob_bar(away_pct, rg.away_team, rg.home_team)}
   {_danger_html(sim)}
-  {_analysis_accordion(analysis_html, idx)}
+  {_analysis_accordion(analysis_html, idx, "이전 경기 분석 보기")}
   {boxscore_html}
 </div>"""
 
