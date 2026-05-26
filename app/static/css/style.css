@@ -725,3 +725,180 @@ main.sim-wrap { max-width: 1100px; }
   .pitcher-compare { grid-template-columns: 1fr; }
   .pitcher-divider { display: none; }
 }
+
+/* ── 경기 상세 (game_detail) ───────────────────────────── */
+.result-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.result-card-link:hover { border-color: var(--accent); }
+.rc-detail-hint {
+  font-size: .68rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: .2rem;
+}
+.result-card-link:hover .rc-detail-hint { color: var(--accent); }
+
+.gd-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+
+.gd-header {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.gd-back {
+  display: inline-block;
+  font-size: .8rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-bottom: .6rem;
+}
+.gd-back:hover { color: var(--accent); }
+.gd-date { font-size: .85rem; color: var(--text-muted); margin-bottom: .8rem; }
+
+.gd-matchup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-bottom: .8rem;
+}
+.gd-team-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+  opacity: .7;
+}
+.gd-team-block.gd-winner { opacity: 1; }
+.gd-role { font-size: .7rem; color: var(--text-muted); }
+.gd-team-name { font-size: 1.2rem; font-weight: 800; }
+.gd-score { font-size: 2.2rem; font-weight: 900; color: var(--accent); }
+.gd-team-block.gd-winner .gd-score { color: var(--correct); }
+.gd-colon { font-size: 2rem; font-weight: 900; color: var(--border); align-self: center; }
+.gd-vs { font-size: 1rem; color: var(--wrong); font-weight: 700; }
+
+.gd-pitchers {
+  display: flex;
+  justify-content: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.gd-pit-tag {
+  font-size: .75rem;
+  padding: .2rem .6rem;
+  border-radius: .3rem;
+  font-weight: 600;
+}
+.gd-pit-tag.win  { background: #14532d; color: var(--correct); }
+.gd-pit-tag.save { background: #1e3a5f; color: #60a5fa; }
+.gd-pit-tag.lose { background: #2a1414; color: var(--text-muted); }
+
+.gd-cancel-notice {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.gd-section { margin-bottom: 2rem; }
+.gd-section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .4rem;
+  margin-bottom: 1rem;
+}
+.gd-sub-title {
+  font-size: .9rem;
+  font-weight: 700;
+  margin-bottom: .5rem;
+  color: var(--text-muted);
+}
+
+/* 특이사항 */
+.gd-special {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: .4rem;
+}
+.gd-special-row {
+  display: flex;
+  gap: .6rem;
+  padding: .4rem .7rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: .4rem;
+  font-size: .85rem;
+}
+.gd-special-label {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  min-width: 4rem;
+}
+.gd-special-value { color: var(--text); }
+
+/* 타자/투수 래퍼 */
+.gd-bat-wrap, .gd-pit-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.gd-table-scroll { overflow-x: auto; }
+
+/* 공통 테이블 */
+.gd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+.gd-table th {
+  background: var(--card-bg);
+  border-bottom: 2px solid var(--border);
+  padding: .35rem .5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.gd-table td {
+  padding: .3rem .5rem;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  white-space: nowrap;
+}
+.gd-table tfoot td {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+  background: var(--card-bg);
+}
+.gd-table .name-col { text-align: left; font-weight: 600; min-width: 4.5rem; }
+.gd-table .pos-col  { color: var(--text-muted); font-size: .72rem; min-width: 1.5rem; }
+.gd-table .inn-col  { font-size: .72rem; color: var(--text-muted); min-width: 2rem; }
+.gd-table .stat-col { font-weight: 600; }
+.gd-table .avg-col  { font-weight: 600; color: var(--accent); }
+.gd-table .stat-hi  { color: var(--correct); font-weight: 700; }
+.gd-sub-row td      { color: var(--text-muted); font-size: .74rem; }
+.gd-sub-row .name-col { padding-left: 1rem; }
+
+/* 투수 결과 태그 */
+.gd-table .result-win  { color: var(--correct); font-weight: 700; }
+.gd-table .result-lose { color: var(--wrong); font-weight: 700; }
+.gd-table .result-save { color: #60a5fa; font-weight: 700; }
+.gd-table .result-hold { color: #fbbf24; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .gd-bat-wrap, .gd-pit-wrap { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .gd-matchup { gap: .8rem; }
+  .gd-score { font-size: 1.6rem; }
+}

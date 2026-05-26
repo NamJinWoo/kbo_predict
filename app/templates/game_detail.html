@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}
+  {{ away_team }} vs {{ home_team }} — {{ game_date }} 경기 결과
+{% endblock %}
+
+{% block content %}
+<div class="gd-page">
+
+  {% set gi = boxscore.get('game_info', {}) %}
+  {% set cancel = boxscore.get('cancel') %}
+  {% set t_score = (gi.get('T_SCORE_CN') or '0') | int %}
+  {% set b_score = (gi.get('B_SCORE_CN') or '0') | int %}
+
+  <!-- 헤더 -->
+  <div class="gd-header">
+    <a href="{{ url_for('main.index') }}" class="gd-back">← 홈으로</a>
+    <div class="gd-date">{{ game_date }} &nbsp;|&nbsp; {{ gi.get('S_NM', '') }}</div>
+
+    {% if cancel %}
+      <div class="gd-matchup">
+        <span class="gd-team-name">{{ away_team }}</span>
+        <span class="gd-vs">{{ cancel }}</span>
+        <span class="gd-team-name">{{ home_team }}</span>
+      </div>
+    {% else %}
+      <div class="gd-matchup">
+        <div class="gd-team-block{% if t_score > b_score %} gd-winner{% endif %}">
+          <span class="gd-role">원정</span>
+          <span class="gd-team-name">{{ away_team }}</span>
+          <span class="gd-score">{{ t_score }}</span>
+        </div>
+        <span class="gd-colon">:</span>
+        <div class="gd-team-block{% if b_score > t_score %} gd-winner{% endif %}">
+          <span class="gd-score">{{ b_score }}</span>
+          <span class="gd-team-name">{{ home_team }}</span>
+          <span class="gd-role">홈</span>
+        </div>
+      </div>
+
+      <!-- 승리/패전/세이브 투수 -->
+      <div class="gd-pitchers">
+        {% if gi.get('W_PIT_P_NM') %}<span class="gd-pit-tag win">승 {{ gi['W_PIT_P_NM'] }}</span>{% endif %}
+        {% if gi.get('SV_PIT_P_NM') %}<span class="gd-pit-tag save">S {{ gi['SV_PIT_P_NM'] }}</span>{% endif %}
+        {% if gi.get('L_PIT_P_NM') %}<span class="gd-pit-tag lose">패 {{ gi['L_PIT_P_NM'] }}</span>{% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  {% if cancel %}
+  <div class="gd-cancel-notice">
+    <p>⚠️ {{ cancel }} — 박스스코어가 없습니다.</p>
+  </div>
+
+  {% else %}
+
+  <!-- 특이사항 -->
+  {% set sp = boxscore.get('special_plays', {}) %}
+  {% if sp %}
+  <section class="gd-section">
+    <h2 class="gd-section-title">경기 특이사항</h2>
+    <div class="gd-special">
+      {% for label, value in sp.items() %}
+      <div class="gd-special-row">
+        <span class="gd-special-label">{{ label }}</span>
+        <span class="gd-special-value">{{ value | replace('\r\n', ' ') | trim }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- 타자 성적 -->
+  <section class="gd-section">
+    <h2 class="gd-section-title">타자 성적</h2>
+    <div class="gd-bat-wrap">
+
+      {% for team_name, bat_data in [(away_team, boxscore.get('away_batters', {})), (home_team, boxscore.get('home_batters', {}))] %}
+      {% if bat_data and bat_data.get('rows') %}
+      <div class="gd-bat-block">
+        <h3 class="gd-sub-title">{{ team_name }}</h3>
+        <div class="gd-table-scroll">
+          <table class="gd-table gd-bat-table">
+            <thead>
+              <tr>
+                {% for h in bat_data.get('headers', []) %}
+                <th class="{% if h | int(-1) >= 0 %}inn-col{% elif h in ('타수','안타','타점','득점','타율') %}stat-col{% endif %}">
+                  {{ h if h else '' }}
+                </th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% set ns = namespace(prev_order='') %}
+              {% for row in bat_data.get('rows', []) %}
+              {% set is_sub = (ns.prev_order != '' and row|length > 0 and row[0] == ns.prev_order) %}
+              <tr{% if is_sub %} class="gd-sub-row"{% endif %}>
+                {% if row|length > 0 %}{% set ns.prev_order = row[0] %}{% endif %}
+                {% set hdrs = bat_data.get('headers', []) %}
+                {% for cell in row %}
+                {% set hi = loop.index0 %}
+                {% set hdr = hdrs[hi] if hi < hdrs|length else '' %}
+                <td class="
+                  {%- if hi == 1 %} pos-col{%- endif %}
+                  {%- if hdr == '선수명' %} name-col{%- endif %}
+                  {%- if hdr | int(-1) >= 0 %} inn-col{%- endif %}
+                  {%- if hdr in ('안타','타점','득점') and cell and cell != '0' %} stat-hi{%- endif %}
+                  {%- if hdr == '타율' %} avg-col{%- endif %}
+                ">{{ cell if cell else '' }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+            {% if bat_data.get('tfoot') %}
+            <tfoot>
+              {% for row in bat_data['tfoot'] %}
+              <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+
+    </div>
+  </section>
+
+  <!-- 투수 성적 -->
+  <section class="gd-section">
+    <h2 class="gd-section-title">투수 성적</h2>
+    <div class="gd-pit-wrap">
+
+      {% for team_name, pit_data in [(away_team, boxscore.get('away_pitchers', {})), (home_team, boxscore.get('home_pitchers', {}))] %}
+      {% if pit_data and pit_data.get('rows') %}
+      <div class="gd-pit-block">
+        <h3 class="gd-sub-title">{{ team_name }}</h3>
+        <div class="gd-table-scroll">
+          <table class="gd-table gd-pit-table">
+            <thead>
+              <tr>
+                {% for h in pit_data.get('headers', []) %}
+                <th>{{ h }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in pit_data.get('rows', []) %}
+              <tr>
+                {% set hdrs = pit_data.get('headers', []) %}
+                {% for cell in row %}
+                {% set hi = loop.index0 %}
+                {% set hdr = hdrs[hi] if hi < hdrs|length else '' %}
+                <td class="
+                  {%- if hi == 0 %} name-col{%- endif %}
+                  {%- if hdr == '결과' and cell == '승' %} result-win{%- endif %}
+                  {%- if hdr == '결과' and cell == '패' %} result-lose{%- endif %}
+                  {%- if hdr == '결과' and cell == '세' %} result-save{%- endif %}
+                  {%- if hdr == '결과' and cell == '홀' %} result-hold{%- endif %}
+                ">{{ cell if cell else '—' }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+            {% if pit_data.get('tfoot') %}
+            <tfoot>
+              {% for row in pit_data['tfoot'] %}
+              <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+
+    </div>
+  </section>
+
+  {% endif %}{# cancel #}
+
+</div>
+{% endblock %}

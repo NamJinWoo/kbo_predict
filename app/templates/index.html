@@ -83,7 +83,8 @@
       {% if recent_games %}
       <div class="result-cards">
         {% for g in recent_games %}
-        <div class="result-card">
+        <a href="{{ url_for('main.game_detail', game_date=g.game_date.isoformat(), away_team=g.away_team, home_team=g.home_team) }}"
+           class="result-card result-card-link">
           <div class="rc-teams">
             <span class="rc-team {% if g.winner == g.away_team %}rc-winner{% endif %}">{{ g.away_team }}</span>
             <span class="rc-score">{{ g.away_score }} : {{ g.home_score }}</span>
@@ -96,7 +97,8 @@
             {% if g.lose_pitcher %}<span class="rc-tag lose">패 {{ g.lose_pitcher }}</span>{% endif %}
           </div>
           {% if g.stadium %}<div class="rc-stadium">{{ g.stadium }}</div>{% endif %}
-        </div>
+          <div class="rc-detail-hint">상세 보기 →</div>
+        </a>
         {% endfor %}
       </div>
       {% else %}

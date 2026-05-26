@@ -223,6 +223,42 @@ def teams():
     )
 
 
+@main.route("/game/<game_date>/<away_team>/<home_team>")
+def game_detail(game_date: str, away_team: str, home_team: str):
+    from app.scraper import scrape_game_boxscore
+    try:
+        gd = datetime.strptime(game_date, "%Y-%m-%d").date()
+    except ValueError:
+        return redirect(url_for("main.index"))
+
+    recent = (
+        RecentGame.query
+        .filter_by(game_date=gd, away_team=away_team, home_team=home_team)
+        .order_by(RecentGame.id.desc())
+        .first()
+    )
+
+    boxscore = scrape_game_boxscore(gd, away_team, home_team)
+
+    # 이닝 헤더: 타자 테이블의 숫자 컬럼만 추출
+    inning_headers = []
+    if boxscore.get("away_batters"):
+        inning_headers = [
+            h for h in boxscore["away_batters"]["headers"]
+            if h.isdigit()
+        ]
+
+    return render_template(
+        "game_detail.html",
+        recent=recent,
+        boxscore=boxscore,
+        inning_headers=inning_headers,
+        game_date=game_date,
+        away_team=away_team,
+        home_team=home_team,
+    )
+
+
 @main.route("/admin/scrape", methods=["POST"])
 def admin_scrape():
     now = datetime.utcnow()

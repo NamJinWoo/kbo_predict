@@ -12,10 +12,27 @@ HEADERS = {
     "Referer": "https://statiz.co.kr/",
 }
 
+KBO_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.koreabaseball.com/",
+    "Content-Type": "application/x-www-form-urlencoded",
+}
+
 TEAM_CODE_MAP = {
     "1001": "삼성", "2002": "KIA", "3001": "롯데", "5002": "LG",
     "6002": "두산", "7002": "한화", "9002": "SSG", "10001": "키움",
     "11001": "NC",  "12001": "KT",
+}
+
+# KBO 공식 API 팀 ID (gameId 생성에 사용)
+TEAM_KBO_ID = {
+    "LG":   "LG",  "롯데": "LT",  "KIA":  "HT",  "두산": "OB",
+    "삼성": "SS",  "한화": "HH",  "SSG":  "SK",  "KT":   "KT",
+    "NC":   "NC",  "키움": "WO",
 }
 
 STADIUM_MAP = {
@@ -516,4 +533,142 @@ def scrape_all() -> dict:
         "standings":      merged,
         "today_games":    upcoming,
         "recent_results": recent_results,
+    }
+
+
+# ── KBO 공식 박스스코어 ─────────────────────────────────────────
+
+def _kbo_game_id(game_date: date, away_team: str, home_team: str) -> str:
+    away_id = TEAM_KBO_ID.get(away_team, "")
+    home_id = TEAM_KBO_ID.get(home_team, "")
+    return f"{game_date.strftime('%Y%m%d')}{away_id}{home_id}0"
+
+
+def _parse_box_table(table: dict) -> tuple[list, list]:
+    """KBO GetBoxScore 테이블 → (headers, rows) 텍스트 리스트"""
+    headers = [
+        c.get("Text", "").replace("&nbsp;", "").strip()
+        for row in table.get("headers", [])
+        for c in row.get("row", [])
+    ]
+    rows = []
+    for row in table.get("rows", []):
+        cells = [c.get("Text", "").replace("&nbsp;", "").strip() for c in row.get("row", [])]
+        rows.append(cells)
+    tfoot = []
+    for row in table.get("tfoot", []):
+        cells = [c.get("Text", "").replace("&nbsp;", "").strip() for c in row.get("row", [])]
+        tfoot.append(cells)
+    return headers, rows, tfoot
+
+
+def scrape_game_boxscore(game_date: date, away_team: str, home_team: str) -> dict:
+    """
+    KBO 공식 API에서 경기 박스스코어를 가져온다.
+    반환:
+      game_id, cancel, special_plays,
+      away_batters / home_batters  (헤더 + 행 + tfoot),
+      away_pitchers / home_pitchers,
+      away_name / home_name,
+      game_info (W/L/S 투수, 구장, 시간 등)
+    """
+    import json
+
+    game_id = _kbo_game_id(game_date, away_team, home_team)
+
+    # ── 1. 게임 기본 정보 (투수 이름 ID 매핑용) ──
+    game_info: dict = {}
+    pid_to_name: dict = {}
+    try:
+        resp = requests.post(
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList",
+            headers=KBO_HEADERS, timeout=10,
+            data="date={}&leId=1&srId=0".format(game_date.strftime("%Y%m%d")),
+        )
+        resp.raise_for_status()
+        data = json.loads(resp.text)
+        for g in data.get("game", []):
+            if g.get("G_ID") == game_id:
+                game_info = g
+                # 투수 이름 ID 매핑
+                for pid_key, pnm_key in [
+                    ("T_PIT_P_ID", "T_PIT_P_NM"),  # 원정 선발
+                    ("B_PIT_P_ID", "B_PIT_P_NM"),  # 홈 선발
+                    ("W_PIT_P_ID", "W_PIT_P_NM"),
+                    ("L_PIT_P_ID", "L_PIT_P_NM"),
+                    ("SV_PIT_P_ID", "SV_PIT_P_NM"),
+                    ("T_D_PIT_P_ID", "T_D_PIT_P_NM"),
+                    ("B_D_PIT_P_ID", "B_D_PIT_P_NM"),
+                ]:
+                    pid = g.get(pid_key)
+                    pnm = (g.get(pnm_key) or "").strip()
+                    if pid and pnm:
+                        pid_to_name[str(pid)] = pnm
+                break
+    except Exception:
+        pass
+
+    if game_info.get("CANCEL_SC_ID") == "1":
+        return {
+            "game_id": game_id,
+            "cancel": game_info.get("CANCEL_SC_NM", "취소"),
+            "game_info": game_info,
+        }
+
+    if not game_info.get("GAME_RESULT_CK"):
+        return {
+            "game_id": game_id,
+            "cancel": "경기 미완료",
+            "game_info": game_info,
+        }
+
+    # ── 2. 박스스코어 ──
+    try:
+        resp = requests.post(
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScore",
+            headers=KBO_HEADERS, timeout=10,
+            data=f"gameId={game_id}&leId=1&srId=0&seasonId={game_date.year}",
+        )
+        resp.raise_for_status()
+        data = json.loads(resp.text)
+    except Exception as e:
+        return {"game_id": game_id, "error": str(e), "game_info": game_info}
+
+    tables = data.get("tables", [])
+    if len(tables) < 5:
+        return {"game_id": game_id, "error": "박스스코어 데이터 없음", "game_info": game_info}
+
+    # 테이블 0: 특이사항 (결승타, 홈런, 2루타, ...)
+    _, special_rows, _ = _parse_box_table(tables[0])
+    special_plays = {row[0]: row[1].strip() for row in special_rows if len(row) >= 2}
+
+    # 테이블 1: 원정 타자 / 테이블 2: 홈 타자
+    away_bat_hdrs, away_bat_rows, away_bat_foot = _parse_box_table(tables[1])
+    home_bat_hdrs, home_bat_rows, home_bat_foot = _parse_box_table(tables[2])
+
+    # 테이블 3: 원정 투수 / 테이블 4: 홈 투수 (선수명 자리에 ID 올 수 있음)
+    away_pit_hdrs, away_pit_rows, away_pit_foot = _parse_box_table(tables[3])
+    home_pit_hdrs, home_pit_rows, home_pit_foot = _parse_box_table(tables[4])
+
+    # 홈 투수 이름 ID → 이름 치환
+    for row in home_pit_rows:
+        if row and row[0].isdigit():
+            row[0] = pid_to_name.get(row[0], row[0])
+
+    # 결과/홀드 태그 정규화
+    for row in away_pit_rows + home_pit_rows:
+        if len(row) > 2 and row[2] == "&nbsp;":
+            row[2] = ""
+
+    return {
+        "game_id":         game_id,
+        "cancel":          None,
+        "game_info":       game_info,
+        "special_plays":   special_plays,
+        "away_name":       away_team,
+        "home_name":       home_team,
+        "away_batters":    {"headers": away_bat_hdrs, "rows": away_bat_rows, "tfoot": away_bat_foot},
+        "home_batters":    {"headers": home_bat_hdrs, "rows": home_bat_rows, "tfoot": home_bat_foot},
+        "away_pitchers":   {"headers": away_pit_hdrs, "rows": away_pit_rows, "tfoot": away_pit_foot},
+        "home_pitchers":   {"headers": home_pit_hdrs, "rows": home_pit_rows, "tfoot": home_pit_foot},
     }
