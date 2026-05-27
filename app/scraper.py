@@ -560,6 +560,30 @@ def _parse_box_table(table: dict) -> tuple[list, list]:
     return headers, rows, tfoot
 
 
+_pid_name_cache: dict = {}
+
+
+def _resolve_player_name(pid: str) -> str:
+    """Resolve KBO player ID to name via detail page, with in-memory cache."""
+    if pid in _pid_name_cache:
+        return _pid_name_cache[pid]
+    try:
+        resp = requests.get(
+            f"https://www.koreabaseball.com/Record/Player/PitcherDetail/Basic.aspx?playerId={pid}",
+            headers={**KBO_HEADERS, "Content-Type": "text/html"},
+            timeout=5,
+        )
+        resp.encoding = "utf-8"
+        m = re.search(r"lblName[^>]*>([^<]+)", resp.text)
+        if m:
+            name = m.group(1).strip()
+            _pid_name_cache[pid] = name
+            return name
+    except Exception:
+        pass
+    return pid
+
+
 def scrape_game_boxscore(game_date: date, away_team: str, home_team: str) -> dict:
     """
     KBO 공식 API에서 경기 박스스코어를 가져온다.
@@ -602,6 +626,7 @@ def scrape_game_boxscore(game_date: date, away_team: str, home_team: str) -> dic
                     pnm = (g.get(pnm_key) or "").strip()
                     if pid and pnm:
                         pid_to_name[str(pid)] = pnm
+                        _pid_name_cache[str(pid)] = pnm
                 break
     except Exception:
         pass
@@ -648,10 +673,10 @@ def scrape_game_boxscore(game_date: date, away_team: str, home_team: str) -> dic
     away_pit_hdrs, away_pit_rows, away_pit_foot = _parse_box_table(tables[3])
     home_pit_hdrs, home_pit_rows, home_pit_foot = _parse_box_table(tables[4])
 
-    # 홈 투수 이름 ID → 이름 치환
-    for row in home_pit_rows:
+    # 투수 이름 ID → 이름 치환 (KBO API가 홈팀 투수를 ID로 반환하는 경우)
+    for row in away_pit_rows + home_pit_rows:
         if row and row[0].isdigit():
-            row[0] = pid_to_name.get(row[0], row[0])
+            row[0] = pid_to_name.get(row[0]) or _resolve_player_name(row[0])
 
     # 결과/홀드 태그 정규화
     for row in away_pit_rows + home_pit_rows:

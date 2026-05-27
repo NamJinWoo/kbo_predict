@@ -5,6 +5,9 @@ from datetime import date, datetime
 from typing import Optional
 import markdown
 import json
+import subprocess
+import threading
+from pathlib import Path
 
 main = Blueprint("main", __name__)
 
@@ -268,10 +271,6 @@ def admin_scrape():
         from app.scraper import scrape_all
         data = scrape_all()
 
-        # 갱신 전 기존 데이터 초기화 (누적 방지)
-        RecentGame.query.delete()
-        TodayGame.query.delete()
-
         standings = data["standings"]
         for s in standings:
             ts = TeamStat(
@@ -300,6 +299,10 @@ def admin_scrape():
 
     try:
         games = data["today_games"]
+        # 스크레이프된 날짜만 교체 (다른 날짜 TodayGame 보존)
+        new_dates = {g["game_date"] for g in games}
+        for d in new_dates:
+            TodayGame.query.filter_by(game_date=d).delete()
         for g in games:
             tg = TodayGame(
                 scraped_at=now,
@@ -318,7 +321,16 @@ def admin_scrape():
 
     try:
         recent_list = data.get("recent_results", [])
+        added = 0
         for r in recent_list:
+            # 같은 날짜+경기 조합이 이미 있으면 스킵 (중복 방지)
+            exists = RecentGame.query.filter_by(
+                game_date=r["game_date"],
+                away_team=r["away_team"],
+                home_team=r["home_team"],
+            ).first()
+            if exists:
+                continue
             rg = RecentGame(
                 scraped_at=now,
                 game_date=r["game_date"],
@@ -333,18 +345,32 @@ def admin_scrape():
                 stadium=r.get("stadium", ""),
             )
             db.session.add(rg)
-        scraped += len(recent_list)
+            added += 1
+        scraped += added
     except Exception as e:
         db.session.rollback()
         return jsonify({"ok": False, "error": f"recent_results: {e}"}), 500
 
     db.session.commit()
+
+    # 블로그 빌드를 백그라운드로 실행 (완료 안 기다림)
+    build_script = Path(__file__).parent.parent / "build_blog.py"
+    if build_script.exists():
+        def _build():
+            subprocess.run(
+                ["python", str(build_script)],
+                cwd=str(build_script.parent),
+                capture_output=True,
+            )
+        threading.Thread(target=_build, daemon=True).start()
+
     return jsonify({
         "ok": True,
         "scraped": scraped,
         "standings": len(standings),
         "games": len(games),
-        "recent": len(data.get("recent_results", [])),
+        "recent": added,
+        "blog": "building",
     })
 
 
