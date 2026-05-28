@@ -440,12 +440,43 @@ def _parse_prediction_full_stats(html: str) -> dict:
     }
 
 
+def _kbo_pitchers_for_date(target_date: date) -> dict:
+    """KBO 공식 API에서 선발투수 이름 조회.
+    Returns {(away_team, home_team): (away_pitcher, home_pitcher)}.
+    """
+    date_str = target_date.strftime("%Y%m%d")
+    try:
+        resp = requests.post(
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList",
+            headers=KBO_HEADERS, timeout=10,
+            data=f"date={date_str}&leId=1&srId=0",
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return {}
+    result = {}
+    for g in data.get("game", []):
+        if str(g.get("G_DT", "")) != date_str:
+            continue
+        away_team = (g.get("AWAY_NM") or "").strip()
+        home_team = (g.get("HOME_NM") or "").strip()
+        away_p = (g.get("T_PIT_P_NM") or "").strip()
+        home_p = (g.get("B_PIT_P_NM") or "").strip()
+        if away_team and home_team:
+            result[(away_team, home_team)] = (away_p, home_p)
+    return result
+
+
 def _scrape_pitchers_for_date(target_date: date) -> dict:
     """
     Fetch starting pitchers + full game stats for all games on target_date.
     Returns {(away_team, home_team): {"away_pitcher": str, "home_pitcher": str, "stats": dict}}.
-    Makes 1 + N HTTP requests (list page + one per game).
+    Pitcher names from KBO official API; stats from statiz individual prediction pages.
     """
+    # Pitcher names: KBO API (reliable for both today and upcoming games)
+    kbo_pitchers = _kbo_pitchers_for_date(target_date)
+
     date_str = target_date.strftime("%Y%m%d")
     resp = requests.get(
         f"https://statiz.co.kr/prediction/?m=main&g_date={date_str}",
@@ -468,6 +499,7 @@ def _scrape_pitchers_for_date(target_date: date) -> dict:
         home_team = TEAM_CODE_MAP.get(codes[1], "")
         if not away_team or not home_team:
             continue
+        kbo_names = kbo_pitchers.get((away_team, home_team), ("", ""))
         try:
             p_resp = requests.get(
                 f"https://statiz.co.kr/prediction/?s_no={s_no}",
@@ -475,10 +507,20 @@ def _scrape_pitchers_for_date(target_date: date) -> dict:
             )
             p_resp.raise_for_status()
             p_html = p_resp.text
-            names = re.findall(r'<div class="name">(.*?)</div>', p_html)
-            away_p = names[0].strip() if names else ""
-            home_p = names[1].strip() if len(names) > 1 else ""
             full_stats = _parse_prediction_full_stats(p_html)
+            # Pitcher names: prefer statiz page (has stats), fallback to KBO API
+            statiz_names = [
+                n.strip() for n in re.findall(r'<div class="name">(.*?)</div>', p_html)
+                if 'OPS' not in n and ':' not in n and not re.search(r'^\s*[\d.]+\s*$', n)
+            ]
+            # Only trust statiz names if pitcher stats are present (확인된 선발)
+            has_pitcher_stats = bool(full_stats.get("away") and full_stats["away"].get("평균자책"))
+            if has_pitcher_stats and len(statiz_names) >= 2:
+                away_p = statiz_names[0]
+                home_p = statiz_names[1]
+            else:
+                away_p = kbo_names[0]
+                home_p = kbo_names[1]
             result[(away_team, home_team)] = {
                 "away_pitcher": away_p,
                 "home_pitcher": home_p,
@@ -486,7 +528,17 @@ def _scrape_pitchers_for_date(target_date: date) -> dict:
             }
         except Exception:
             result[(away_team, home_team)] = {
-                "away_pitcher": "", "home_pitcher": "", "stats": {}
+                "away_pitcher": kbo_names[0],
+                "home_pitcher": kbo_names[1],
+                "stats": {},
+            }
+    # Add any KBO games not found via statiz
+    for (away_team, home_team), (away_p, home_p) in kbo_pitchers.items():
+        if (away_team, home_team) not in result:
+            result[(away_team, home_team)] = {
+                "away_pitcher": away_p,
+                "home_pitcher": home_p,
+                "stats": {},
             }
     return result
 

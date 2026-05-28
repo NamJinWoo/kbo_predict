@@ -463,9 +463,12 @@ def admin_scrape():
     # 블로그 빌드를 백그라운드로 실행 (완료 안 기다림)
     build_script = Path(__file__).parent.parent / "build_blog.py"
     if build_script.exists():
+        # Use venv Python to ensure Flask/deps are available
+        venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python"
+        python_bin = str(venv_python) if venv_python.exists() else "python3"
         def _build():
             subprocess.run(
-                ["python", str(build_script)],
+                [python_bin, str(build_script)],
                 cwd=str(build_script.parent),
                 capture_output=True,
             )
