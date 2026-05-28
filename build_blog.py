@@ -560,7 +560,7 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
   {pit_html}
   {_prob_bar(away_pct, rg.away_team, rg.home_team)}
   {_danger_html(sim)}
-  {_analysis_accordion(analysis_html, idx, "이전 경기 분석 보기")}
+  {_analysis_accordion(analysis_html, idx, "예측 분석 보기 (왜 맞았는지/틀렸는지)")}
   {boxscore_html}
 </div>"""
 
@@ -636,9 +636,24 @@ def build_completed_page(game_date: date, games: list, team_stats: dict) -> str:
     for idx, rg in enumerate(games):
         away_stat = team_stats.get(rg.away_team)
         home_stat = team_stats.get(rg.home_team)
-        sim  = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
-        ana  = generate_analysis(sim, away_stat, home_stat)
-        ana_html = md_lib.markdown(ana, extensions=["extra", "nl2br"])
+
+        # 저장된 예측 데이터 사용 (원래 선발투수/스탯 반영된 예측값)
+        if rg.sim_json:
+            try:
+                sim = json.loads(rg.sim_json)
+            except Exception:
+                sim = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
+        else:
+            sim = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
+
+        # 예측 vs 결과 분석 (왜 맞았는지/틀렸는지) 우선 사용
+        if rg.result_analysis:
+            ana_html = md_lib.markdown(rg.result_analysis, extensions=["extra", "nl2br"])
+        else:
+            ana_html = md_lib.markdown(
+                generate_analysis(sim, away_stat, home_stat), extensions=["extra", "nl2br"]
+            )
+
         try:
             bs = scrape_game_boxscore(rg.game_date, rg.away_team, rg.home_team)
         except Exception:
