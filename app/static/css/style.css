@@ -389,6 +389,53 @@ footer { text-align: center; padding: 1.5rem; color: var(--text-muted); font-siz
 .rc-tag.lose { background: #2a1414; color: var(--text-muted); }
 .rc-stadium { font-size: .7rem; color: var(--text-muted); }
 
+.rc-pred-row {
+  display: flex; align-items: center; gap: .4rem;
+  margin-top: .3rem; padding-top: .3rem;
+  border-top: 1px solid var(--border);
+}
+.rc-pred-badge {
+  font-size: .68rem; font-weight: 700; padding: .1rem .4rem;
+  border-radius: 4px; white-space: nowrap;
+}
+.rc-pred-badge.correct { background: #14532d; color: #86efac; }
+.rc-pred-badge.wrong   { background: #3b0a0a; color: #fca5a5; }
+.rc-pred-detail { font-size: .68rem; color: var(--text-muted); }
+
+/* ── GAME DETAIL RESULT ANALYSIS ──────────────────────────── */
+.gd-result-analysis { margin-top: 1.5rem; }
+.gd-analysis-meta {
+  display: flex; align-items: center; gap: .6rem;
+  margin-bottom: 1rem;
+}
+.gd-pred-badge {
+  font-size: .8rem; font-weight: 700; padding: .2rem .6rem;
+  border-radius: 6px;
+}
+.gd-pred-badge.pred-correct { background: #14532d; color: #86efac; }
+.gd-pred-badge.pred-wrong   { background: #3b0a0a; color: #fca5a5; }
+.gd-actual-badge {
+  font-size: .8rem; color: var(--text-muted);
+  padding: .2rem .5rem; border: 1px solid var(--border); border-radius: 6px;
+}
+.gd-analysis-body {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.2rem 1.4rem;
+  font-size: .88rem; line-height: 1.65;
+}
+.gd-analysis-body h2 { font-size: 1rem; margin: 1rem 0 .4rem; color: var(--text); }
+.gd-analysis-body h3 { font-size: .9rem; margin: .8rem 0 .3rem; color: var(--accent); }
+.gd-analysis-body ul, .gd-analysis-body ol { padding-left: 1.2rem; }
+.gd-analysis-body li { margin-bottom: .2rem; }
+.gd-analysis-body strong { color: var(--text); }
+.gd-analysis-body table {
+  width: 100%; border-collapse: collapse; font-size: .82rem; margin: .6rem 0;
+}
+.gd-analysis-body th, .gd-analysis-body td {
+  padding: .3rem .5rem; border: 1px solid var(--border); text-align: left;
+}
+.gd-analysis-body th { background: var(--surface); }
+
 /* ── STANDINGS TABLE ─────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }
 .standings-table {

@@ -180,5 +180,39 @@
 
   {% endif %}{# cancel #}
 
+  <!-- 시뮬레이션 예측 결과 분석 -->
+  {% if recent and recent.result_analysis %}
+  <section class="gd-section gd-result-analysis">
+    <h2 class="gd-section-title">
+      {% if recent.predicted_winner == recent.winner %}
+        ✅ 예측 적중 분석
+      {% else %}
+        ❌ 예측 빗나감 분석
+      {% endif %}
+    </h2>
+    <div class="gd-analysis-meta">
+      <span class="gd-pred-badge {% if recent.predicted_winner == recent.winner %}pred-correct{% else %}pred-wrong{% endif %}">
+        예측: {{ recent.predicted_winner }}
+        {%- if recent.sim_confidence %} ({{ recent.sim_confidence | round(0) | int }}%){% endif %}
+      </span>
+      <span class="gd-actual-badge">실제: {{ recent.winner }}</span>
+    </div>
+    <div class="gd-analysis-body">
+      {{ result_analysis_html | safe }}
+    </div>
+  </section>
+  {% elif recent and recent.predicted_winner %}
+  <section class="gd-section gd-result-analysis">
+    <h2 class="gd-section-title">시뮬레이션 예측</h2>
+    <div class="gd-analysis-meta">
+      <span class="gd-pred-badge {% if recent.predicted_winner == recent.winner %}pred-correct{% else %}pred-wrong{% endif %}">
+        예측: {{ recent.predicted_winner }}
+        {%- if recent.sim_confidence %} ({{ recent.sim_confidence | round(0) | int }}%){% endif %}
+      </span>
+      <span class="gd-actual-badge">실제: {{ recent.winner }}</span>
+    </div>
+  </section>
+  {% endif %}
+
 </div>
 {% endblock %}

@@ -251,6 +251,12 @@ def game_detail(game_date: str, away_team: str, home_team: str):
             if h.isdigit()
         ]
 
+    result_analysis_html = ""
+    if recent and recent.result_analysis:
+        result_analysis_html = markdown.markdown(
+            recent.result_analysis, extensions=["extra", "nl2br"]
+        )
+
     return render_template(
         "game_detail.html",
         recent=recent,
@@ -259,6 +265,7 @@ def game_detail(game_date: str, away_team: str, home_team: str):
         game_date=game_date,
         away_team=away_team,
         home_team=home_team,
+        result_analysis_html=result_analysis_html,
     )
 
 
@@ -346,6 +353,13 @@ def admin_scrape():
             )
             db.session.add(rg)
             added += 1
+
+            # 경기 결과 vs 시뮬레이션 예측 분석 자동 생성
+            try:
+                _attach_result_analysis(rg, r)
+            except Exception:
+                pass  # 분석 실패해도 스크래핑은 계속
+
         scraped += added
     except Exception as e:
         db.session.rollback()
@@ -489,3 +503,70 @@ def _build_draft(away: str, home: str, team_stats: dict, game: Optional[TodayGam
     lines.append("\n## 결론\n\n**예측: **  \n**확신도: **%")
 
     return "\n".join(lines)
+
+
+def _attach_result_analysis(rg: "RecentGame", r: dict) -> None:
+    """새로 저장되는 RecentGame에 시뮬레이션 예측 vs 결과 분석을 첨부한다."""
+    from app.simulator import run_simulation, generate_result_analysis
+    from sqlalchemy import cast, Date as SaDate
+
+    away_score = r.get("away_score") or 0
+    home_score = r.get("home_score") or 0
+    if away_score == 0 and home_score == 0:
+        return  # 취소/무효 경기
+
+    actual_winner = r["away_team"] if away_score > home_score else r["home_team"]
+
+    # 해당 날짜의 TodayGame 찾기 (예측 데이터)
+    today_game = (
+        TodayGame.query
+        .filter_by(game_date=r["game_date"], away_team=r["away_team"], home_team=r["home_team"])
+        .order_by(TodayGame.scraped_at.desc())
+        .first()
+    )
+    if not today_game:
+        return  # 선발 정보 없으면 분석 불가
+
+    # 경기 날짜 이전의 가장 최신 TeamStat 스냅샷
+    away_ts = (
+        TeamStat.query
+        .filter(TeamStat.team == r["away_team"])
+        .filter(cast(TeamStat.scraped_at, SaDate) <= r["game_date"])
+        .order_by(TeamStat.scraped_at.desc())
+        .first()
+    )
+    home_ts = (
+        TeamStat.query
+        .filter(TeamStat.team == r["home_team"])
+        .filter(cast(TeamStat.scraped_at, SaDate) <= r["game_date"])
+        .order_by(TeamStat.scraped_at.desc())
+        .first()
+    )
+
+    sim = run_simulation(r["away_team"], r["home_team"], away_ts, home_ts, today_game)
+
+    rg.predicted_winner = sim["predicted_winner"]
+    rg.sim_confidence   = sim["confidence"]
+
+    # 분석에 필요한 핵심 데이터만 저장
+    compact = {
+        k: sim[k] for k in (
+            "away_team", "home_team", "predicted_winner", "confidence",
+            "away_win_pct", "home_win_pct", "lambda_away", "lambda_home",
+            "away_pitcher", "home_pitcher", "away_pitcher_era", "home_pitcher_era",
+            "h2h_away_win_pct", "h2h_home_win_pct",
+            "h2h_away_games",   "h2h_home_games",
+            "h2h_away_record",  "h2h_home_record",
+            "factors",
+        ) if k in sim
+    }
+    rg.sim_json = json.dumps(compact, ensure_ascii=False)
+
+    rg.result_analysis = generate_result_analysis(
+        sim,
+        actual_winner,
+        away_score,
+        home_score,
+        win_pitcher=r.get("win_pitcher", ""),
+        lose_pitcher=r.get("lose_pitcher", ""),
+    )

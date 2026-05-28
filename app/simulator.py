@@ -69,6 +69,46 @@ def _parse_matchup_wins(record: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _parse_h2h_record(record: str) -> Optional[tuple]:
+    """'3승 0무 2패' or '3-0-2' → (wins, draws, losses)"""
+    w = re.search(r"(\d+)승", record or "")
+    l = re.search(r"(\d+)패", record or "")
+    if w and l:
+        d = re.search(r"(\d+)무", record or "")
+        return int(w.group(1)), (int(d.group(1)) if d else 0), int(l.group(1))
+    m = re.match(r"(\d+)-(\d+)-(\d+)", record or "")
+    if m:
+        return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return None
+
+
+def _h2h_win_pct(record: str) -> Optional[float]:
+    parsed = _parse_h2h_record(record)
+    if not parsed:
+        return None
+    w, d, l = parsed
+    total = w + d + l
+    return (w + d * 0.5) / total if total > 0 else None
+
+
+def _h2h_total_games(record: str) -> int:
+    parsed = _parse_h2h_record(record)
+    return sum(parsed) if parsed else 0
+
+
+def _career_vs_factor(win_pct: Optional[float], total_games: int) -> float:
+    """통산 특정팀 상대 승률 → 득점 조정 계수 (0.93 ~ 1.07)
+    투수 승률 높음 → 상대팀 득점 낮아짐 → factor < 1.0
+    3경기 미만은 샘플 부족으로 무시.
+    """
+    if win_pct is None or total_games < 3:
+        return 1.0
+    # 15경기 이상이면 full weight, 미만이면 비례 적용
+    sample_weight = min(1.0, total_games / 15)
+    raw = 1.0 - (win_pct - 0.5) * 0.20
+    return 1.0 + (raw - 1.0) * sample_weight
+
+
 def _danger_factor(batters: list[dict]) -> float:
     """상위 3타자 평균 OPS → 런 프로덕션 조정 계수 (0.90 ~ 1.15)"""
     ops_list = [b["ops"] for b in (batters or [])[:5] if b.get("ops", 0) > 0]
@@ -119,22 +159,35 @@ def run_simulation(
             return 1.0
         return max(0.55, min(1.75, era / LEAGUE_AVG_ERA))
 
-    # ── Head-to-head ERA factor ──
-    # away pitcher's h2h ERA vs home team batters → affects lambda_home
-    # home pitcher's h2h ERA vs away team batters → affects lambda_away
-    h2h_away_era = _parse_float((h2h.get("away") or {}).get("상대 평균자책", ""))
-    h2h_home_era = _parse_float((h2h.get("home") or {}).get("상대 평균자책", ""))
+    # ── Head-to-head ERA factor + 통산 승률 ──
+    # away pitcher's h2h ERA/record vs home team batters → affects lambda_home
+    # home pitcher's h2h ERA/record vs away team batters → affects lambda_away
+    h2h_away_era    = _parse_float((h2h.get("away") or {}).get("상대 평균자책", ""))
+    h2h_home_era    = _parse_float((h2h.get("home") or {}).get("상대 평균자책", ""))
+    h2h_away_record = (h2h.get("away") or {}).get("상대전적", "")
+    h2h_home_record = (h2h.get("home") or {}).get("상대전적", "")
 
-    # Blend: season ERA 75% + h2h ERA 25% (h2h has small sample, don't over-weight)
-    def blended_era_factor(season_era, h2h_era):
+    h2h_away_win_pct = _h2h_win_pct(h2h_away_record)
+    h2h_home_win_pct = _h2h_win_pct(h2h_home_record)
+    h2h_away_games   = _h2h_total_games(h2h_away_record)
+    h2h_home_games   = _h2h_total_games(h2h_home_record)
+
+    # Blend: season ERA + career ERA (가중치는 통산 경기 수에 비례)
+    def blended_era_factor(season_era, h2h_era, h2h_games=0):
         sf = era_factor(season_era)
         hf = era_factor(h2h_era)
         if h2h_era and h2h_era > 0:
-            return sf * 0.75 + hf * 0.25
+            h2h_w = 0.35 if h2h_games >= 5 else 0.25
+            return sf * (1 - h2h_w) + hf * h2h_w
         return sf
 
-    away_era_factor = blended_era_factor(home_pitcher_era, h2h_home_era)  # home pitcher faces away bats
-    home_era_factor = blended_era_factor(away_pitcher_era, h2h_away_era)  # away pitcher faces home bats
+    # 통산 상대 승률 보정 (ERA 블렌딩과 별개로 소폭 추가 반영)
+    # away pitcher high win_pct vs home team → home team scores LESS → lambda_home ↓
+    away_career_factor = _career_vs_factor(h2h_away_win_pct, h2h_away_games)  # affects lambda_home
+    home_career_factor = _career_vs_factor(h2h_home_win_pct, h2h_home_games)  # affects lambda_away
+
+    away_era_factor = blended_era_factor(home_pitcher_era, h2h_home_era, h2h_home_games)
+    home_era_factor = blended_era_factor(away_pitcher_era, h2h_away_era, h2h_away_games)
 
     # ── 최근 흐름 ──
     away_streak = (away_stat.streak_num if away_stat else 0)
@@ -169,12 +222,16 @@ def run_simulation(
         rm_away_factor = rm_home_factor = 1.0
 
     # ── λ 계산 ──
+    # away_career_factor: away pitcher's career dominance vs home team → reduces lambda_home
+    # home_career_factor: home pitcher's career dominance vs away team → reduces lambda_away
     lambda_away = (
         away_rpg * away_era_factor * away_form * road_factor * danger_away * rm_away_factor
+        * home_career_factor
     )
     lambda_home = (
         home_rpg * home_era_factor * home_form * home_field_factor
         * HOME_ADVANTAGE * danger_home * rm_home_factor
+        * away_career_factor
     )
 
     lambda_away = max(2.0, min(10.0, lambda_away))
@@ -228,12 +285,21 @@ def run_simulation(
         "away_streak":         away_streak,
         "home_streak":         home_streak,
         "n_sim":               N_SIM,
+        "h2h_away_win_pct":    h2h_away_win_pct,
+        "h2h_home_win_pct":    h2h_home_win_pct,
+        "h2h_away_games":      h2h_away_games,
+        "h2h_home_games":      h2h_home_games,
+        "h2h_away_record":     h2h_away_record,
+        "h2h_home_record":     h2h_home_record,
         "factors":             _build_factors(
             away_team, home_team, away_stat, home_stat,
             away_pitcher, home_pitcher,
             away_pitcher_era, home_pitcher_era,
             lambda_away, lambda_home, final_away, final_home,
             h2h, team_comp, dangerous,
+            h2h_away_win_pct, h2h_home_win_pct,
+            h2h_away_games, h2h_home_games,
+            h2h_away_record, h2h_home_record,
         ),
     }
 
@@ -243,6 +309,9 @@ def _build_factors(
     away_pitcher, home_pitcher, away_era, home_era,
     lambda_away, lambda_home, away_pct, home_pct,
     h2h, team_comp, dangerous,
+    h2h_away_win_pct=None, h2h_home_win_pct=None,
+    h2h_away_games=0, h2h_home_games=0,
+    h2h_away_record="", h2h_home_record="",
 ) -> list[dict]:
     factors = []
 
@@ -277,6 +346,29 @@ def _build_factors(
             "desc": f"{away_pitcher} 상대(홈팀) ERA {h2h_away_era:.2f} — {'불안' if h2h_away_era > 4.5 else '준수'}",
             "side": "home" if h2h_away_era > 4.5 else "away",
         })
+
+    # 2-b. 통산 상대 승률 (3경기 이상일 때만)
+    for pitcher, record, games, win_pct, opp_team, side in [
+        (away_pitcher, h2h_away_record, h2h_away_games, h2h_away_win_pct, home_team, "away"),
+        (home_pitcher, h2h_home_record, h2h_home_games, h2h_home_win_pct, away_team, "home"),
+    ]:
+        if pitcher and games >= 3 and win_pct is not None:
+            parsed = _parse_h2h_record(record)
+            w, d, l = parsed if parsed else (0, 0, 0)
+            pct_str = f"{win_pct*100:.0f}%"
+            if win_pct >= 0.65:
+                label = "상성 우위"
+                fav_side = side
+            elif win_pct <= 0.35:
+                label = "상성 열세"
+                fav_side = "home" if side == "away" else "away"
+            else:
+                continue  # 보통이면 팩터 표시 생략
+            factors.append({
+                "icon": "🗂️", "title": f"{pitcher} 통산 {opp_team} 상대",
+                "desc": f"{w}승{d}무{l}패 (승률 {pct_str}) — {label}",
+                "side": fav_side,
+            })
 
     # 3. 위험 타자
     vs_hp = dangerous.get("vs_home_pitcher", [])
@@ -396,11 +488,29 @@ def _claude_analysis(sim: dict, away_stat, home_stat, api_key: str) -> str:
     ah2h = h2h.get("away", {})
     hh2h = h2h.get("home", {})
     if ah2h or hh2h:
-        h2h_block = f"\n[선발투수 상대전적]\n"
+        h2h_block = f"\n[선발투수 통산 상대팀 성적]\n"
         if ah2h.get("상대 평균자책"):
-            h2h_block += f"  {sim['away_pitcher']} vs {home}타선: ERA {ah2h.get('상대 평균자책','?')}, OOPS {ah2h.get('상대 OOPS','?')}\n"
+            record_a = sim.get("h2h_away_record", "")
+            pct_a = sim.get("h2h_away_win_pct")
+            games_a = sim.get("h2h_away_games", 0)
+            pct_str_a = f"승률 {pct_a*100:.0f}% ({games_a}경기)" if pct_a is not None and games_a > 0 else ""
+            h2h_block += f"  {sim['away_pitcher']} vs {home}타선: ERA {ah2h.get('상대 평균자책','?')}, OOPS {ah2h.get('상대 OOPS','?')}"
+            if record_a:
+                h2h_block += f", 전적 {record_a}"
+            if pct_str_a:
+                h2h_block += f" ({pct_str_a})"
+            h2h_block += "\n"
         if hh2h.get("상대 평균자책"):
-            h2h_block += f"  {sim['home_pitcher']} vs {away}타선: ERA {hh2h.get('상대 평균자책','?')}, OOPS {hh2h.get('상대 OOPS','?')}\n"
+            record_h = sim.get("h2h_home_record", "")
+            pct_h = sim.get("h2h_home_win_pct")
+            games_h = sim.get("h2h_home_games", 0)
+            pct_str_h = f"승률 {pct_h*100:.0f}% ({games_h}경기)" if pct_h is not None and games_h > 0 else ""
+            h2h_block += f"  {sim['home_pitcher']} vs {away}타선: ERA {hh2h.get('상대 평균자책','?')}, OOPS {hh2h.get('상대 OOPS','?')}"
+            if record_h:
+                h2h_block += f", 전적 {record_h}"
+            if pct_str_h:
+                h2h_block += f" ({pct_str_h})"
+            h2h_block += "\n"
 
     danger = sim.get("dangerous_batters", {})
     danger_block = ""
@@ -449,7 +559,7 @@ def _claude_analysis(sim: dict, away_stat, home_stat, api_key: str) -> str:
 (3가지 불릿 — 이 경기의 핵심 관전 포인트)
 
 ## 선발 투수 분석
-(시즌 스탯 + 상대팀 상대전적 ERA/OOPS 포함, 오늘 예상 퍼포먼스)
+(시즌 스탯 + 통산 상대팀 ERA/OOPS/승률 포함, 상성(특정 팀에 유독 강하거나 약한 패턴) 분석, 오늘 예상 퍼포먼스)
 
 ## 위협 타자 분석
 (각 팀에서 상대 선발투수를 상대로 강한 타자, 그 타자들의 기록이 경기에 미칠 영향)
@@ -500,6 +610,19 @@ def _rule_based_analysis(sim: dict, away_stat, home_stat) -> str:
     if h2h_home_era and h2h_home_era > 5.0:
         points.append(f"**{home_pitcher_trap(sim)} 상대전적**: {sim['home_pitcher']} vs {away}타선 통산 ERA {h2h_home_era:.2f} — 상성 불리")
 
+    # 통산 승률 기반 상성 핵심 포인트
+    for pitcher, win_pct, games, opp_team, record in [
+        (sim["away_pitcher"], sim.get("h2h_away_win_pct"), sim.get("h2h_away_games", 0), home, sim.get("h2h_away_record", "")),
+        (sim["home_pitcher"], sim.get("h2h_home_win_pct"), sim.get("h2h_home_games", 0), away, sim.get("h2h_home_record", "")),
+    ]:
+        if pitcher and win_pct is not None and games >= 3:
+            parsed = _parse_h2h_record(record)
+            w, d, l = parsed if parsed else (0, 0, 0)
+            if win_pct >= 0.65:
+                points.append(f"**{pitcher} vs {opp_team} 상성**: {w}승{d}무{l}패 (승률 {win_pct*100:.0f}%) — 역대 상성 우위")
+            elif win_pct <= 0.35:
+                points.append(f"**{pitcher} vs {opp_team} 상성**: {w}승{d}무{l}패 (승률 {win_pct*100:.0f}%) — 역대 상성 열세")
+
     vs_hp = danger.get("vs_home_pitcher", [])
     if vs_hp and vs_hp[0].get("ops", 0) >= 0.900:
         top = vs_hp[0]
@@ -530,13 +653,27 @@ def _rule_based_analysis(sim: dict, away_stat, home_stat) -> str:
             key_fields = [k for k in ("경기이닝", "승패", "평균자책", "WHIP", "탈삼진", "볼넷", "WAR") if k in pstats]
             if key_fields:
                 lines.append("  " + " | ".join(f"{k}: {pstats[k]}" for k in key_fields))
-        # 상대전적 ERA
+        # 통산 상대팀 성적 (ERA + 승률)
         h2h_key = "home" if side == "홈" else "away"
         h2h_era = _parse_float((h2h.get(h2h_key) or {}).get("상대 평균자책", ""))
         h2h_oops = (h2h.get(h2h_key) or {}).get("상대 OOPS", "")
+        win_pct_key = "h2h_home_win_pct" if side == "홈" else "h2h_away_win_pct"
+        games_key   = "h2h_home_games"   if side == "홈" else "h2h_away_games"
+        record_key  = "h2h_home_record"  if side == "홈" else "h2h_away_record"
+        h2h_wpc   = sim.get(win_pct_key)
+        h2h_games = sim.get(games_key, 0)
+        h2h_rec   = sim.get(record_key, "")
+        opp_label = away if side == "홈" else home
         if h2h_era and h2h_era > 0:
-            h2h_label = f"{away if side == '홈' else home}"
-            lines.append(f"  → {h2h_label}타선 통산: ERA {h2h_era:.2f}, OOPS {h2h_oops}")
+            extra = ""
+            if h2h_wpc is not None and h2h_games >= 3:
+                parsed = _parse_h2h_record(h2h_rec)
+                if parsed:
+                    w, d, l = parsed
+                    trend = "상성 우위" if h2h_wpc >= 0.6 else ("상성 열세" if h2h_wpc <= 0.4 else "")
+                    trend_str = f" — {trend}" if trend else ""
+                    extra = f" | 전적 {w}승{d}무{l}패 (승률 {h2h_wpc*100:.0f}%){trend_str}"
+            lines.append(f"  → {opp_label}타선 통산: ERA {h2h_era:.2f}, OOPS {h2h_oops}{extra}")
         if era:
             comment = "ERA 3.5 미만 — 리그 에이스급" if era < 3.5 else ("ERA 4.5 미만 — 평균 이상" if era < 4.5 else "ERA 4.5 초과 — 불안정")
             lines.append(f"  ▸ {comment}")
@@ -600,6 +737,19 @@ def _rule_based_analysis(sim: dict, away_stat, home_stat) -> str:
         bp.append(f"**선발 투수 지배력**: ERA 차이 {abs(sim['away_pitcher_era'] - sim['home_pitcher_era']):.2f}가 경기 흐름 결정")
     if h2h_home_era and h2h_home_era > 5.5:
         bp.append(f"**{sim['home_pitcher']} 상성**: 통산 {away}타선 상대 ERA {h2h_home_era:.2f} — 조기 교체 가능성")
+    # 통산 승률 기반 승부 포인트
+    for pitcher, win_pct, games, opp_team, record in [
+        (sim["away_pitcher"], sim.get("h2h_away_win_pct"), sim.get("h2h_away_games", 0), home, sim.get("h2h_away_record", "")),
+        (sim["home_pitcher"], sim.get("h2h_home_win_pct"), sim.get("h2h_home_games", 0), away, sim.get("h2h_home_record", "")),
+    ]:
+        if pitcher and win_pct is not None and games >= 5:
+            parsed = _parse_h2h_record(record)
+            if parsed:
+                w, d, l = parsed
+                if win_pct >= 0.70:
+                    bp.append(f"**{pitcher} 상성 강점**: {opp_team} 상대 {w}승{l}패 (승률 {win_pct*100:.0f}%) — 역대 지배력 발휘 기대")
+                elif win_pct <= 0.30:
+                    bp.append(f"**{pitcher} 상성 취약**: {opp_team} 상대 {w}승{l}패 (승률 {win_pct*100:.0f}%) — 상성 변수")
     vs_hp2 = danger.get("vs_home_pitcher", [])
     if vs_hp2 and vs_hp2[0].get("ops", 0) >= 0.950:
         bp.append(f"**{vs_hp2[0]['name']}의 활약**: OPS {vs_hp2[0]['ops']:.3f} vs {sim['home_pitcher']} — 경기 판도 변수")
@@ -620,6 +770,13 @@ def _rule_based_analysis(sim: dict, away_stat, home_stat) -> str:
             reasons.append("선발 ERA 우위")
     if h2h_home_era and h2h_home_era > 5.0 and fav == away:
         reasons.append(f"상대팀 선발 상성 불리(h2h ERA {h2h_home_era:.2f})")
+    # 통산 승률 우위 근거
+    for pitcher, win_pct, games, pitcher_team in [
+        (sim["away_pitcher"], sim.get("h2h_away_win_pct"), sim.get("h2h_away_games", 0), away),
+        (sim["home_pitcher"], sim.get("h2h_home_win_pct"), sim.get("h2h_home_games", 0), home),
+    ]:
+        if pitcher and win_pct is not None and games >= 3 and fav == pitcher_team and win_pct >= 0.65:
+            reasons.append(f"{pitcher} 통산 상대 상성 우위({win_pct*100:.0f}%)")
     if away_stat and home_stat:
         fav_s = away_stat if fav == away else home_stat
         if fav_s.streak_num >= 2:
@@ -645,3 +802,354 @@ def _rule_based_analysis(sim: dict, away_stat, home_stat) -> str:
 
 def home_pitcher_trap(sim: dict) -> str:
     return sim.get("home_team", "")
+
+
+# ── 경기 결과 분석 ──────────────────────────────────────────────
+
+def generate_result_analysis(
+    sim: dict,
+    actual_winner: str,
+    away_score: int,
+    home_score: int,
+    win_pitcher: str = "",
+    lose_pitcher: str = "",
+) -> str:
+    """시뮬레이션 예측 대비 실제 경기 결과 분석 생성 (Claude or 규칙 기반)"""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if api_key:
+        try:
+            return _claude_result_analysis(
+                sim, actual_winner, away_score, home_score,
+                win_pitcher, lose_pitcher, api_key,
+            )
+        except Exception:
+            pass
+    return _rule_result_analysis(sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher)
+
+
+def _claude_result_analysis(
+    sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher, api_key
+) -> str:
+    import anthropic
+
+    away = sim["away_team"]
+    home = sim["home_team"]
+    predicted = sim["predicted_winner"]
+    is_correct = predicted == actual_winner
+    factors = sim.get("factors", [])
+    actual_side = "away" if actual_winner == away else "home"
+
+    factor_lines = "\n".join(f"  [{f['side']}] {f['icon']} {f['title']}: {f['desc']}" for f in factors)
+
+    career_block = ""
+    for pitcher, win_pct, games, record, opp in [
+        (sim.get("away_pitcher",""), sim.get("h2h_away_win_pct"), sim.get("h2h_away_games",0),
+         sim.get("h2h_away_record",""), home),
+        (sim.get("home_pitcher",""), sim.get("h2h_home_win_pct"), sim.get("h2h_home_games",0),
+         sim.get("h2h_home_record",""), away),
+    ]:
+        if pitcher and win_pct is not None and games >= 3:
+            career_block += f"\n  {pitcher} vs {opp}: {record} (승률 {win_pct*100:.0f}%, {games}경기)"
+
+    result_label = "✅ 적중" if is_correct else "❌ 빗나감"
+    header_label = "✅ 예측 적중" if is_correct else "❌ 예측 빗나감"
+    factor_section = "적중 핵심 요인" if is_correct else "빗나간 원인 분석"
+    factor_hint = "(어떤 요인이 가장 결정적이었는지, 3줄 이내)" if is_correct else "(예상과 달랐던 구체적 이유, 3줄 이내)"
+    mvp_section = "오늘의 MVP 요인" if is_correct else "다음 시뮬레이션 주목 포인트"
+    mvp_hint = "(가장 예측력이 높았던 지표 한 줄 강조)" if is_correct else "(앞으로 이 매치업에서 더 주목해야 할 변수 2~3가지, 불릿)"
+    improvement_block = "" if is_correct else (
+        "\n\n### 시뮬레이션 개선 제안\n"
+        "(이번 오류에서 학습할 수 있는 기준 추가/가중치 조정 제안 1~2가지)"
+    )
+    lambda_away_str = f"{sim.get('lambda_away', 0):.1f}" if sim.get("lambda_away") else "-"
+    lambda_home_str = f"{sim.get('lambda_home', 0):.1f}" if sim.get("lambda_home") else "-"
+    era_away = sim.get("away_pitcher_era") or "-"
+    era_home = sim.get("home_pitcher_era") or "-"
+
+    prompt = (
+        "당신은 KBO 프로야구 예측 분석 전문가입니다.\n\n"
+        f"경기: {away}(원정) {away_score} - {home_score} {home}(홈)\n"
+        f"실제 승리: {actual_winner}\n\n"
+        "[시뮬레이션 예측]\n"
+        f"- 예측 승팀: {predicted} ({sim['confidence']}% 우세)\n"
+        f"- 예측 득점: {away} {lambda_away_str}점 / {home} {lambda_home_str}점\n"
+        f"- 결과: {result_label}\n\n"
+        "[예측 요인 카드]\n"
+        f"{factor_lines if factor_lines else '요인 없음'}\n\n"
+        "[선발 투수]\n"
+        f"- {away}: {sim.get('away_pitcher','-')} (ERA {era_away})\n"
+        f"- {home}: {sim.get('home_pitcher','-')} (ERA {era_home})\n\n"
+        f"[투수 통산 상대 성적]{career_block if career_block else ' 없음'}\n\n"
+        "[실제 투수 결과]\n"
+        f"- 승리투수: {win_pitcher or '-'}\n"
+        f"- 패전투수: {lose_pitcher or '-'}\n\n"
+        "위 데이터를 바탕으로 아래 형식으로 분석해주세요:\n\n"
+        f"## {header_label}\n\n"
+        f"**예측**: {predicted} 승 ({sim['confidence']}%) → **실제**: {actual_winner} 승 ({away_score}:{home_score})\n\n"
+        "### 예측 득점 정확도\n"
+        "(예측 λ vs 실제 스코어 비교, 어느 팀 득점이 더 잘/못 맞았는지)\n\n"
+        f"### {factor_section}\n"
+        f"{factor_hint}\n\n"
+        f"### {mvp_section}\n"
+        f"{mvp_hint}"
+        f"{improvement_block}\n\n"
+        "간결하고 날카롭게, 구체적 수치를 인용하여 작성하세요."
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.content[0].text
+
+
+def _rule_result_analysis(
+    sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher
+) -> str:
+    away = sim["away_team"]
+    home = sim["home_team"]
+    predicted = sim["predicted_winner"]
+    is_correct = predicted == actual_winner
+    confidence = sim.get("confidence", 50)
+    lambda_away = sim.get("lambda_away", 0) or 0
+    lambda_home = sim.get("lambda_home", 0) or 0
+    factors = sim.get("factors", [])
+    actual_side = "away" if actual_winner == away else "home"
+
+    icon = "✅" if is_correct else "❌"
+    label = "예측 적중" if is_correct else "예측 빗나감"
+
+    lines = [f"## {icon} {label}", ""]
+    lines.append(f"**예측**: {predicted} 승 ({confidence}% 우세) → **실제**: {actual_winner} 승 ({away} {away_score} - {home_score} {home})")
+    lines.append("")
+
+    # 득점 예측 정확도
+    away_err = abs(away_score - lambda_away)
+    home_err = abs(home_score - lambda_home)
+    lines.append("### 예측 득점 정확도")
+    for team, predicted_runs, actual_runs, err in [
+        (away, lambda_away, away_score, away_err),
+        (home, lambda_home, home_score, home_err),
+    ]:
+        accuracy = "근접" if err <= 1.5 else ("소폭 차이" if err <= 3.0 else "큰 차이")
+        lines.append(f"- {team}: 예측 {predicted_runs:.1f}점 → 실제 {actual_runs}점 (오차 {err:.1f}, {accuracy})")
+    lines.append("")
+
+    # 요인 검증
+    supporting = [f for f in factors if f.get("side") == actual_side]
+    opposing   = [f for f in factors if f.get("side") and f.get("side") != actual_side]
+    total_f = len([f for f in factors if f.get("side")])
+
+    if is_correct:
+        lines.append(f"### 적중 기여 요인 ({len(supporting)}/{total_f}개 일치)")
+        for f in supporting:
+            lines.append(f"- {f['icon']} **{f['title']}**: {f['desc']}")
+        if opposing:
+            lines.append(f"\n반대 신호 ({len(opposing)}개는 이번엔 맞지 않음):")
+            for f in opposing:
+                lines.append(f"- {f['icon']} {f['title']}: {f['desc']}")
+        lines.append("")
+
+        # Career win rate vindicated?
+        career_notes = _check_career_accuracy(sim, actual_winner, win_pitcher, lose_pitcher)
+        if career_notes:
+            lines.append("### 통산 상성 적중")
+            for note in career_notes:
+                lines.append(f"- {note}")
+            lines.append("")
+
+        lines.append("### 핵심 적중 포인트")
+        if supporting:
+            hero = supporting[0]
+            lines.append(f"**{hero['title']}**이 가장 결정적: {hero['desc']}")
+        else:
+            lines.append("시뮬레이션 종합 전력 우위가 경기 결과로 이어졌습니다.")
+
+    else:
+        # Wrong prediction
+        lines.append(f"### 빗나간 원인 분석")
+        reasons = _find_failure_reasons(sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher)
+        for r in reasons:
+            lines.append(f"- {r}")
+        lines.append("")
+
+        if opposing:
+            lines.append(f"*실제로는 {actual_winner}를 지지했던 요인 ({len(opposing)}개):*")
+            for f in opposing:
+                lines.append(f"  - {f['icon']} {f['title']}: {f['desc']}")
+            lines.append("")
+
+        lines.append("### 다음 시뮬레이션 주목 포인트")
+        suggestions = _build_suggestions(sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher)
+        for s in suggestions:
+            lines.append(f"- {s}")
+        lines.append("")
+
+        lines.append("### 시뮬레이션 개선 제안")
+        improvements = _build_improvements(sim, actual_winner, away_score, home_score)
+        for imp in improvements:
+            lines.append(f"- {imp}")
+
+    return "\n".join(lines)
+
+
+def _check_career_accuracy(sim, actual_winner, win_pitcher, lose_pitcher) -> list:
+    away = sim["away_team"]
+    notes = []
+    for pitcher, win_pct, games, record, opp, pitcher_team in [
+        (sim.get("away_pitcher",""), sim.get("h2h_away_win_pct"), sim.get("h2h_away_games",0),
+         sim.get("h2h_away_record",""), sim["home_team"], away),
+        (sim.get("home_pitcher",""), sim.get("h2h_home_win_pct"), sim.get("h2h_home_games",0),
+         sim.get("h2h_home_record",""), away, sim["home_team"]),
+    ]:
+        if not pitcher or win_pct is None or games < 3:
+            continue
+        dominated = win_pct >= 0.60
+        struggled = win_pct <= 0.40
+        if dominated and actual_winner == pitcher_team and win_pitcher == pitcher:
+            notes.append(f"{pitcher} vs {opp} 통산 {record} (승률 {win_pct*100:.0f}%) — 상성 우위가 이번에도 유효")
+        elif struggled and actual_winner != pitcher_team and lose_pitcher == pitcher:
+            notes.append(f"{pitcher} vs {opp} 통산 {record} (승률 {win_pct*100:.0f}%) — 취약 상성이 이번에도 확인")
+    return notes
+
+
+def _find_failure_reasons(sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher) -> list:
+    away = sim["away_team"]
+    home = sim["home_team"]
+    lambda_away = sim.get("lambda_away", 0) or 0
+    lambda_home = sim.get("lambda_home", 0) or 0
+    reasons = []
+
+    actual_side = "away" if actual_winner == away else "home"
+    predicted_side = "home" if actual_side == "away" else "away"
+
+    # 스코어 이상치
+    actual_runs = away_score if actual_winner == away else home_score
+    predicted_runs = lambda_away if actual_winner == away else lambda_home
+    loser_actual = home_score if actual_winner == away else away_score
+    loser_predicted = lambda_home if actual_winner == away else lambda_away
+
+    if actual_runs > predicted_runs * 1.4:
+        reasons.append(f"{actual_winner} 타선 폭발 — 예측({predicted_runs:.1f}점) 대비 실제 {actual_runs}점, 타선이 시뮬레이션을 초과")
+    if loser_actual < loser_predicted * 0.6:
+        loser = home if actual_winner == away else away
+        reasons.append(f"{loser} 타선 침묵 — 예측({loser_predicted:.1f}점)보다 훨씬 저조한 {loser_actual}점")
+
+    # 패전 투수 분석
+    for pitcher_name, pitcher_era, pitcher_team in [
+        (sim.get("away_pitcher",""), sim.get("away_pitcher_era"), away),
+        (sim.get("home_pitcher",""), sim.get("home_pitcher_era"), home),
+    ]:
+        if pitcher_name and pitcher_name == lose_pitcher and pitcher_era and pitcher_era < 4.0:
+            reasons.append(
+                f"{pitcher_name}(시즌 ERA {pitcher_era:.2f}) 이날 부진 — "
+                f"시즌 누적 ERA가 당일 컨디션을 보장하지 않음"
+            )
+
+    # 상성 역전
+    for pitcher, win_pct, games, record, opp, pitcher_team in [
+        (sim.get("away_pitcher",""), sim.get("h2h_away_win_pct"), sim.get("h2h_away_games",0),
+         sim.get("h2h_away_record",""), home, away),
+        (sim.get("home_pitcher",""), sim.get("h2h_home_win_pct"), sim.get("h2h_home_games",0),
+         sim.get("h2h_home_record",""), away, home),
+    ]:
+        if pitcher and win_pct is not None and games >= 3:
+            if win_pct >= 0.65 and actual_winner == opp:
+                reasons.append(
+                    f"{pitcher} 통산 {opp} 상대 승률 {win_pct*100:.0f}%({record})이었지만 이번엔 상성 역전"
+                )
+            elif win_pct <= 0.35 and actual_winner == pitcher_team:
+                reasons.append(
+                    f"{pitcher} 통산 {opp} 상대 취약(승률 {win_pct*100:.0f}%)했으나 이번엔 극복"
+                )
+
+    if not reasons:
+        margin = abs(sim["away_win_pct"] - sim["home_win_pct"])
+        if margin < 10:
+            reasons.append(f"전력 차이 {margin:.1f}%p — 시뮬레이션도 박빙으로 본 경기, 변수 발생")
+        else:
+            reasons.append("주요 변수(부상, 갑작스러운 라인업 변경 등) 시뮬레이션 외 요인")
+
+    return reasons
+
+
+def _build_suggestions(sim, actual_winner, away_score, home_score, win_pitcher, lose_pitcher) -> list:
+    away = sim["away_team"]
+    home = sim["home_team"]
+    lambda_away = sim.get("lambda_away", 0) or 0
+    lambda_home = sim.get("lambda_home", 0) or 0
+    suggestions = []
+
+    # 투수 컨디션
+    for pitcher_name, pitcher_era, pitcher_team in [
+        (sim.get("away_pitcher",""), sim.get("away_pitcher_era"), away),
+        (sim.get("home_pitcher",""), sim.get("home_pitcher_era"), home),
+    ]:
+        if pitcher_name and pitcher_name == lose_pitcher and pitcher_era and pitcher_era < 4.5:
+            suggestions.append(
+                f"{pitcher_name} 최근 5경기 ERA 추세 확인 — 시즌 누적 ERA({pitcher_era:.2f})보다 "
+                f"최근 흐름이 당일 성적을 더 잘 예측"
+            )
+
+    # 대폭 득점 초과
+    actual_winner_runs = away_score if actual_winner == away else home_score
+    predicted_winner_runs = lambda_away if actual_winner == away else lambda_home
+    if actual_winner_runs > predicted_winner_runs * 1.3:
+        suggestions.append(
+            f"{actual_winner} 불펜 vs 타선 매치업 — 선발 이후 불펜 ERA/WHIP을 포함한 "
+            f"전체 투수력으로 보정 필요"
+        )
+
+    # 상성 역전
+    for pitcher, win_pct, games, opp, pitcher_team in [
+        (sim.get("away_pitcher",""), sim.get("h2h_away_win_pct"), sim.get("h2h_away_games",0), home, away),
+        (sim.get("home_pitcher",""), sim.get("h2h_home_win_pct"), sim.get("h2h_home_games",0), away, home),
+    ]:
+        if pitcher and win_pct is not None and games >= 5 and win_pct >= 0.65 and actual_winner == opp:
+            suggestions.append(
+                f"통산 상성 역전 발생 → {opp} 라인업 변화(좌/우 타자 비율) 확인 필요"
+            )
+
+    if not suggestions:
+        suggestions.append("선발 교체 타이밍과 불펜 운영 상황 — 이닝 수 / 구수 기록 체크")
+        suggestions.append("팀 최근 3경기 득점 추세 — 연속 경기 피로도 반영 고려")
+
+    return suggestions[:4]
+
+
+def _build_improvements(sim, actual_winner, away_score, home_score) -> list:
+    away = sim["away_team"]
+    home = sim["home_team"]
+    lambda_away = sim.get("lambda_away", 0) or 0
+    lambda_home = sim.get("lambda_home", 0) or 0
+    improvements = []
+
+    # ERA는 좋은데 실점이 많은 경우 → 불펜 가중치 상향 제안
+    actual_side_runs = away_score if actual_winner == away else home_score
+    predicted_side_runs = lambda_away if actual_winner == away else lambda_home
+    if actual_side_runs > predicted_side_runs * 1.4:
+        improvements.append(
+            "불펜 ERA/WAR 가중치 상향 검토 — 선발 이후 이닝에서 실점이 예측을 초과함"
+        )
+
+    # 상성 역전이 잦으면 → 시즌 초반/후반 분리 제안
+    for pitcher, win_pct, games in [
+        (sim.get("away_pitcher",""), sim.get("h2h_away_win_pct"), sim.get("h2h_away_games",0)),
+        (sim.get("home_pitcher",""), sim.get("h2h_home_win_pct"), sim.get("h2h_home_games",0)),
+    ]:
+        if pitcher and win_pct is not None and games >= 5:
+            if (win_pct >= 0.65 and actual_winner != (away if pitcher == sim.get("away_pitcher") else home)):
+                improvements.append(
+                    f"통산 상성 데이터를 시즌 단위로 분리(최근 1년 vs 전체 통산) — "
+                    f"로스터/코칭스태프 변화 후 상성이 달라질 수 있음"
+                )
+                break
+
+    if not improvements:
+        improvements.append(
+            "선발 투수 최근 5경기 ERA를 별도 변수로 추가 — 시즌 ERA보다 현재 컨디션 반영"
+        )
+
+    return improvements[:2]

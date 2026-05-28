@@ -97,6 +97,17 @@
             {% if g.lose_pitcher %}<span class="rc-tag lose">패 {{ g.lose_pitcher }}</span>{% endif %}
           </div>
           {% if g.stadium %}<div class="rc-stadium">{{ g.stadium }}</div>{% endif %}
+          {% if g.predicted_winner %}
+          <div class="rc-pred-row">
+            {% if g.predicted_winner == g.winner %}
+            <span class="rc-pred-badge correct">✅ 적중</span>
+            {% else %}
+            <span class="rc-pred-badge wrong">❌ 빗나감</span>
+            {% endif %}
+            <span class="rc-pred-detail">예측: {{ g.predicted_winner }}
+              {%- if g.sim_confidence %} ({{ g.sim_confidence | round(0) | int }}%){% endif %}</span>
+          </div>
+          {% endif %}
           <div class="rc-detail-hint">상세 보기 →</div>
         </a>
         {% endfor %}

@@ -94,6 +94,11 @@ class RecentGame(db.Model):
     save_pitcher = db.Column(db.String(30))
     hold_pitcher = db.Column(db.String(30))
     stadium = db.Column(db.String(40))
+    # 시뮬레이션 예측 대비 결과 분석
+    predicted_winner = db.Column(db.String(20))
+    sim_confidence = db.Column(db.Float)
+    sim_json = db.Column(db.Text)        # 예측 시점 시뮬레이션 핵심 데이터
+    result_analysis = db.Column(db.Text) # 예측 vs 실제 결과 분석 (markdown)
 
     __table_args__ = (
         Index("ix_recent_game_date", "game_date"),
