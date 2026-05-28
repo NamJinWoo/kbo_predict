@@ -188,7 +188,100 @@ def stats():
     total = len(all_preds)
     correct = sum(1 for p in all_preds if p.is_correct)
     accuracy = round(correct / total * 100, 1) if total else 0
-    return render_template("stats.html", total=total, correct=correct, accuracy=accuracy, predictions=all_preds)
+
+    # RecentGame 기반 시뮬레이션 예측 정확도 트렌드
+    # winner는 @property이므로 scores로 필터링
+    sim_games = RecentGame.query.filter(
+        RecentGame.predicted_winner.isnot(None),
+        RecentGame.away_score.isnot(None),
+        RecentGame.home_score.isnot(None),
+    ).order_by(RecentGame.game_date.asc()).all()
+
+    # 월별 집계
+    from collections import defaultdict
+    monthly: dict[str, dict] = defaultdict(lambda: {"total": 0, "correct": 0})
+    for g in sim_games:
+        if g.game_date:
+            key = g.game_date.strftime("%Y-%m")
+            monthly[key]["total"] += 1
+            if g.predicted_winner == g.winner:
+                monthly[key]["correct"] += 1
+
+    monthly_labels = sorted(monthly.keys())
+    monthly_accuracy = [
+        round(monthly[m]["correct"] / monthly[m]["total"] * 100, 1)
+        if monthly[m]["total"] else 0
+        for m in monthly_labels
+    ]
+    monthly_totals = [monthly[m]["total"] for m in monthly_labels]
+
+    # 신뢰도 구간별 정확도
+    confidence_buckets = [
+        {"label": "50~59%", "min": 50, "max": 60},
+        {"label": "60~69%", "min": 60, "max": 70},
+        {"label": "70~79%", "min": 70, "max": 80},
+        {"label": "80%+",   "min": 80, "max": 101},
+    ]
+    for b in confidence_buckets:
+        bucket_games = [
+            g for g in sim_games
+            if g.sim_confidence and b["min"] <= g.sim_confidence < b["max"]
+        ]
+        b["total"] = len(bucket_games)
+        b["correct"] = sum(1 for g in bucket_games if g.predicted_winner == g.winner)
+        b["accuracy"] = round(b["correct"] / b["total"] * 100, 1) if b["total"] else None
+
+    # 팀 상성 히트맵 (RecentGame 전체 기록 기반)
+    all_games = RecentGame.query.filter(
+        RecentGame.away_score.isnot(None),
+        RecentGame.home_score.isnot(None),
+    ).all()
+    TEAMS = ["삼성", "KIA", "롯데", "LG", "두산", "한화", "SSG", "키움", "NC", "KT"]
+    h2h_matrix: dict[tuple, dict] = defaultdict(lambda: {"wins": 0, "total": 0})
+    for g in all_games:
+        away, home, winner = g.away_team, g.home_team, g.winner
+        if away not in TEAMS or home not in TEAMS:
+            continue
+        h2h_matrix[(away, home)]["total"] += 1
+        h2h_matrix[(home, away)]["total"] += 1
+        if winner == away:
+            h2h_matrix[(away, home)]["wins"] += 1
+        else:
+            h2h_matrix[(home, away)]["wins"] += 1
+
+    heatmap = []
+    for row_team in TEAMS:
+        row = []
+        for col_team in TEAMS:
+            if row_team == col_team:
+                row.append(None)
+            else:
+                d = h2h_matrix.get((row_team, col_team), {"wins": 0, "total": 0})
+                if d["total"] >= 1:
+                    row.append({
+                        "wins": d["wins"],
+                        "total": d["total"],
+                        "pct": round(d["wins"] / d["total"] * 100),
+                    })
+                else:
+                    row.append(None)
+        heatmap.append({"team": row_team, "data": row})
+
+    sim_total = len(sim_games)
+    sim_correct = sum(1 for g in sim_games if g.predicted_winner == g.winner)
+    sim_accuracy = round(sim_correct / sim_total * 100, 1) if sim_total else 0
+
+    return render_template(
+        "stats.html",
+        total=total, correct=correct, accuracy=accuracy, predictions=all_preds,
+        sim_total=sim_total, sim_correct=sim_correct, sim_accuracy=sim_accuracy,
+        monthly_labels=json.dumps(monthly_labels),
+        monthly_accuracy=json.dumps(monthly_accuracy),
+        monthly_totals=json.dumps(monthly_totals),
+        confidence_buckets=confidence_buckets,
+        heatmap=heatmap,
+        heatmap_teams=TEAMS,
+    )
 
 
 @main.route("/teams")

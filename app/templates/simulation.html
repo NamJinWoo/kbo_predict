@@ -68,6 +68,13 @@
               {% for k in key_order %}{% if k in sim.pitcher_stats_away %}
               <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ sim.pitcher_stats_away[k] }}</span></div>
               {% endif %}{% endfor %}
+              {% if sim.away_pitcher_ratios %}
+              <div class="ps-ratios">
+                {% if sim.away_pitcher_ratios.get('K/9') is not none %}<span class="ps-ratio-tag">K/9 {{ sim.away_pitcher_ratios['K/9'] }}</span>{% endif %}
+                {% if sim.away_pitcher_ratios.get('BB/9') is not none %}<span class="ps-ratio-tag">BB/9 {{ sim.away_pitcher_ratios['BB/9'] }}</span>{% endif %}
+                {% if sim.away_pitcher_ratios.get('K-BB/9') is not none %}<span class="ps-ratio-tag {% if sim.away_pitcher_ratios['K-BB/9'] >= 3 %}ratio-good{% elif sim.away_pitcher_ratios['K-BB/9'] < 1 %}ratio-bad{% endif %}">K-BB/9 {{ sim.away_pitcher_ratios['K-BB/9'] }}</span>{% endif %}
+              </div>
+              {% endif %}
             </div>
             {% endif %}
             {% set h2h_away = sim.h2h.get('away', {}) if sim.h2h else {} %}
@@ -100,6 +107,13 @@
               {% for k in key_order %}{% if k in sim.pitcher_stats_home %}
               <div class="ps-row"><span class="ps-key">{{ k }}</span><span class="ps-val">{{ sim.pitcher_stats_home[k] }}</span></div>
               {% endif %}{% endfor %}
+              {% if sim.home_pitcher_ratios %}
+              <div class="ps-ratios">
+                {% if sim.home_pitcher_ratios.get('K/9') is not none %}<span class="ps-ratio-tag">K/9 {{ sim.home_pitcher_ratios['K/9'] }}</span>{% endif %}
+                {% if sim.home_pitcher_ratios.get('BB/9') is not none %}<span class="ps-ratio-tag">BB/9 {{ sim.home_pitcher_ratios['BB/9'] }}</span>{% endif %}
+                {% if sim.home_pitcher_ratios.get('K-BB/9') is not none %}<span class="ps-ratio-tag {% if sim.home_pitcher_ratios['K-BB/9'] >= 3 %}ratio-good{% elif sim.home_pitcher_ratios['K-BB/9'] < 1 %}ratio-bad{% endif %}">K-BB/9 {{ sim.home_pitcher_ratios['K-BB/9'] }}</span>{% endif %}
+              </div>
+              {% endif %}
             </div>
             {% endif %}
             {% set h2h_home = sim.h2h.get('home', {}) if sim.h2h else {} %}
@@ -279,10 +293,25 @@
             </td>
           </tr>
           <tr class="sim-lambda-row">
-            <td>예상 득점</td>
+            <td>예상 득점 (중앙값)</td>
             <td>{{ sim.lambda_away }}</td>
             <td>{{ sim.lambda_home }}</td>
           </tr>
+          {% if sim.away_score_range and sim.home_score_range %}
+          <tr class="sim-range-row">
+            <td>득점 범위 (25~75%)</td>
+            <td>{{ sim.away_score_range[0] }}~{{ sim.away_score_range[2] }}점</td>
+            <td>{{ sim.home_score_range[0] }}~{{ sim.home_score_range[2] }}점</td>
+          </tr>
+          {% endif %}
+          {% if sim.park_factor %}
+          <tr>
+            <td>파크팩터</td>
+            <td colspan="2" class="pf-cell {% if sim.park_factor > 1.02 %}pf-hitter{% elif sim.park_factor < 0.98 %}pf-pitcher{% endif %}">
+              {{ sim.park_factor }} ({{ sim.home_team }} 홈구장)
+            </td>
+          </tr>
+          {% endif %}
         </tbody>
       </table>
       {% endif %}
@@ -348,7 +377,7 @@
 
       <div class="sim-note">
         <small>포아송 분포 기반 10,000회 몬테카를로.<br>
-        ERA·상대전적·위협타자OPS·홈원정·최근흐름 반영.</small>
+        ERA·상대전적·위협타자OPS·홈원정·최근흐름·파크팩터·불펜WAR 반영.</small>
       </div>
 
       <a href="{{ url_for('main.index') }}" class="btn-back-home">← 홈으로</a>

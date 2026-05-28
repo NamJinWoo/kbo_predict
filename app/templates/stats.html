@@ -1,13 +1,15 @@
 {% extends "base.html" %}
-{% block title %}예측 적중률{% endblock %}
+{% block title %}예측 적중률 & 팀 상성{% endblock %}
 
 {% block content %}
-<h1>예측 적중률</h1>
+<div class="stats-page">
+<h1>예측 통계</h1>
 
+<!-- 기존 수동 예측 요약 -->
 <div class="stats-summary">
   <div class="stat-box">
     <div class="stat-number">{{ total }}</div>
-    <div class="stat-label">총 예측</div>
+    <div class="stat-label">수동 예측</div>
   </div>
   <div class="stat-box">
     <div class="stat-number">{{ correct }}</div>
@@ -15,36 +17,185 @@
   </div>
   <div class="stat-box highlight">
     <div class="stat-number">{{ accuracy }}%</div>
-    <div class="stat-label">적중률</div>
+    <div class="stat-label">수동 적중률</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-number">{{ sim_total }}</div>
+    <div class="stat-label">시뮬레이션 예측</div>
+  </div>
+  <div class="stat-box highlight">
+    <div class="stat-number">{{ sim_accuracy }}%</div>
+    <div class="stat-label">시뮬레이션 적중률</div>
   </div>
 </div>
 
-{% if predictions %}
-<table class="stats-table">
-  <thead>
-    <tr>
-      <th>날짜</th>
-      <th>경기</th>
-      <th>예측</th>
-      <th>실제</th>
-      <th>결과</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for pred in predictions %}
-    <tr>
-      <td>{{ pred.game_date.strftime('%m.%d') }}</td>
-      <td>{{ pred.away_team }} vs {{ pred.home_team }}</td>
-      <td>{{ pred.predicted_winner }}</td>
-      <td>{{ pred.actual_winner }}</td>
-      <td class="{{ 'correct' if pred.is_correct else 'wrong' }}">
-        {{ '✓' if pred.is_correct else '✗' }}
-      </td>
-    </tr>
+<!-- 신뢰도별 정확도 -->
+{% if confidence_buckets %}
+<section class="stats-section">
+  <h2>신뢰도 구간별 정확도</h2>
+  <div class="conf-buckets">
+    {% for b in confidence_buckets %}
+    <div class="conf-bucket {% if b.accuracy is not none and b.accuracy >= 60 %}cb-good{% elif b.accuracy is not none and b.accuracy < 50 %}cb-bad{% endif %}">
+      <div class="cb-label">{{ b.label }}</div>
+      <div class="cb-acc">{{ b.accuracy if b.accuracy is not none else '-' }}%</div>
+      <div class="cb-detail">{{ b.correct }}/{{ b.total }}경기</div>
+    </div>
     {% endfor %}
-  </tbody>
-</table>
+  </div>
+</section>
+{% endif %}
+
+<!-- 월별 적중률 차트 -->
+{% if monthly_labels and monthly_labels != '[]' %}
+<section class="stats-section">
+  <h2>월별 시뮬레이션 적중률 추이</h2>
+  <div class="chart-wrap">
+    <canvas id="monthlyChart" height="120"></canvas>
+  </div>
+</section>
+{% endif %}
+
+<!-- 팀 상성 히트맵 -->
+{% if heatmap %}
+<section class="stats-section">
+  <h2>팀간 상성 히트맵 <small>(행: 승리팀 기준 상대전적 승률)</small></h2>
+  <div class="heatmap-wrap">
+    <table class="heatmap-table">
+      <thead>
+        <tr>
+          <th class="hm-corner">↓ 승 / → 상대</th>
+          {% for t in heatmap_teams %}<th class="hm-col-header">{{ t }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in heatmap %}
+        <tr>
+          <th class="hm-row-header">{{ row.team }}</th>
+          {% for cell in row.data %}
+          {% set col_team = heatmap_teams[loop.index0] %}
+          {% if cell is none %}
+          <td class="hm-self">—</td>
+          {% else %}
+          <td class="hm-cell
+            {% if cell.pct >= 65 %} hm-dominant
+            {% elif cell.pct >= 55 %} hm-good
+            {% elif cell.pct <= 35 %} hm-weak
+            {% elif cell.pct <= 45 %} hm-bad
+            {% endif %}"
+            title="{{ row.team }} vs {{ col_team }}: {{ cell.wins }}승 {{ cell.total - cell.wins }}패">
+            {{ cell.pct }}%
+            <div class="hm-games">{{ cell.total }}경기</div>
+          </td>
+          {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hm-note">※ DB에 누적된 경기 결과 기준 (스크래핑 이후 데이터만 집계)</p>
+</section>
+{% endif %}
+
+<!-- 수동 예측 기록 -->
+{% if predictions %}
+<section class="stats-section">
+  <h2>수동 예측 기록</h2>
+  <table class="stats-table">
+    <thead>
+      <tr>
+        <th>날짜</th>
+        <th>경기</th>
+        <th>예측</th>
+        <th>실제</th>
+        <th>결과</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for pred in predictions %}
+      <tr>
+        <td>{{ pred.game_date.strftime('%m.%d') }}</td>
+        <td>{{ pred.away_team }} vs {{ pred.home_team }}</td>
+        <td>{{ pred.predicted_winner }}</td>
+        <td>{{ pred.actual_winner }}</td>
+        <td class="{{ 'correct' if pred.is_correct else 'wrong' }}">
+          {{ '✓' if pred.is_correct else '✗' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
 {% else %}
 <p class="empty">아직 결과가 입력된 예측이 없습니다.</p>
 {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const labels = {{ monthly_labels | safe }};
+  const data   = {{ monthly_accuracy | safe }};
+  const totals = {{ monthly_totals | safe }};
+  if (!labels.length) return;
+
+  const ctx = document.getElementById('monthlyChart');
+  if (!ctx) return;
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          type: 'line',
+          label: '적중률 (%)',
+          data: data,
+          borderColor: '#60a5fa',
+          backgroundColor: 'transparent',
+          pointBackgroundColor: '#60a5fa',
+          tension: 0.3,
+          yAxisID: 'y',
+        },
+        {
+          type: 'bar',
+          label: '경기 수',
+          data: totals,
+          backgroundColor: 'rgba(148,163,184,0.25)',
+          borderColor: 'rgba(148,163,184,0.5)',
+          borderWidth: 1,
+          yAxisID: 'y2',
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#94a3b8' } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ctx.dataset.label + ': ' + ctx.parsed.y + (ctx.datasetIndex === 0 ? '%' : '경기'),
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+        y: {
+          min: 0, max: 100,
+          ticks: { color: '#94a3b8', callback: v => v + '%' },
+          grid: { color: '#1e293b' },
+          title: { display: true, text: '적중률', color: '#94a3b8' },
+        },
+        y2: {
+          position: 'right',
+          ticks: { color: '#94a3b8' },
+          grid: { display: false },
+          title: { display: true, text: '경기 수', color: '#94a3b8' },
+        }
+      }
+    }
+  });
+})();
+</script>
 {% endblock %}

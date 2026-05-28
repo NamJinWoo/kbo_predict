@@ -15,6 +15,23 @@ LEAGUE_AVG_OPS   = 0.750
 HOME_ADVANTAGE   = 1.04
 N_SIM            = 10_000
 
+# KBO 구장별 파크팩터 (홈팀 기준, 1.0 = 리그 평균)
+# 1.0 초과: 타자 유리 구장, 1.0 미만: 투수 유리 구장
+PARK_FACTORS: dict[str, float] = {
+    "LG":   1.05,   # 잠실 (타자 친화적)
+    "두산": 1.05,   # 잠실
+    "삼성": 0.97,   # 대구 (투수 친화적)
+    "KIA":  1.01,   # 광주
+    "롯데": 1.00,   # 부산
+    "한화": 1.02,   # 대전
+    "SSG":  0.97,   # 인천
+    "키움": 0.96,   # 고척 (돔구장, 투수 유리)
+    "NC":   0.95,   # 창원 (투수 유리)
+    "KT":   0.93,   # 수원 (투수 유리)
+}
+
+LEAGUE_AVG_BULLPEN_WAR = 3.0  # KBO 시즌 팀 불펜 WAR 리그 평균 추정치
+
 TEAM_CODE_MAP = {
     "1001": "삼성", "2002": "KIA", "3001": "롯데", "5002": "LG",
     "6002": "두산", "7002": "한화", "9002": "SSG", "10001": "키움",
@@ -109,6 +126,59 @@ def _career_vs_factor(win_pct: Optional[float], total_games: int) -> float:
     return 1.0 + (raw - 1.0) * sample_weight
 
 
+def _parse_innings(innings_str: str) -> Optional[float]:
+    """'80.2' or '80⅔' → 80.667 이닝 float. 1/3=0.333, 2/3=0.667"""
+    if not innings_str:
+        return None
+    s = str(innings_str).strip()
+    # 'X.1' → X + 1/3, 'X.2' → X + 2/3
+    m = re.match(r"(\d+)\.(\d)$", s)
+    if m:
+        whole = int(m.group(1))
+        frac  = int(m.group(2))
+        return whole + (frac / 3.0)
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _pitcher_ratios(stats: dict) -> dict:
+    """탈삼진/볼넷/이닝에서 K/9, BB/9, K-BB% 계산"""
+    ip  = _parse_innings(stats.get("경기이닝", ""))
+    k   = _parse_float(stats.get("탈삼진", ""))
+    bb  = _parse_float(stats.get("볼넷", ""))
+    if ip is None or ip <= 0:
+        return {}
+    result = {}
+    if k is not None:
+        result["K/9"] = round(k / ip * 9, 2)
+    if bb is not None:
+        result["BB/9"] = round(bb / ip * 9, 2)
+    if k is not None and bb is not None:
+        # K-BB%는 (K - BB) / IP * 9 기반 표준화 (비율로 표현)
+        result["K-BB/9"] = round((k - bb) / ip * 9, 2)
+    return result
+
+
+def _park_factor(home_team: str) -> float:
+    """홈팀 구장 파크팩터 (0.90 ~ 1.10)"""
+    return PARK_FACTORS.get(home_team, 1.0)
+
+
+def _bullpen_war_factor(bullpen_war_str: str) -> float:
+    """불펜WAR 문자열 → λ 조정 계수 (0.92 ~ 1.08)
+    WAR이 높을수록 불펜이 좋음 → 상대 득점 감소 → factor < 1.0
+    """
+    war = _parse_float(bullpen_war_str)
+    if war is None:
+        return 1.0
+    # 리그 평균 대비 편차로 ±8% 내에서 선형 조정
+    delta = (war - LEAGUE_AVG_BULLPEN_WAR) / LEAGUE_AVG_BULLPEN_WAR
+    raw = 1.0 - delta * 0.25
+    return max(0.92, min(1.08, raw))
+
+
 def _danger_factor(batters: list[dict]) -> float:
     """상위 3타자 평균 OPS → 런 프로덕션 조정 계수 (0.90 ~ 1.15)"""
     ops_list = [b["ops"] for b in (batters or [])[:5] if b.get("ops", 0) > 0]
@@ -149,9 +219,13 @@ def run_simulation(
         if stats.get("home"):
             pitcher_stats_home = stats["home"]
             home_pitcher_era = _parse_era(stats["home"])
+
         h2h = stats.get("h2h", {})
         team_comp = stats.get("team_comp", {})
         dangerous = stats.get("dangerous_batters", {})
+
+    away_pitcher_ratios = _pitcher_ratios(pitcher_stats_away)
+    home_pitcher_ratios = _pitcher_ratios(pitcher_stats_home)
 
     # ── ERA factor (season) ──
     def era_factor(era: Optional[float]) -> float:
@@ -207,6 +281,17 @@ def run_simulation(
     danger_away = _danger_factor(dangerous.get("vs_home_pitcher", []))
     danger_home = _danger_factor(dangerous.get("vs_away_pitcher", []))
 
+    # ── 파크팩터 ──
+    park_f = _park_factor(home_team)
+
+    # ── 불펜 WAR 보정 ──
+    # 원정팀 불펜WAR 높음 → 홈팀 후반 득점 감소 → lambda_home ↓
+    # 홈팀 불펜WAR 높음 → 원정팀 후반 득점 감소 → lambda_away ↓
+    tc_away = team_comp.get("away", {})
+    tc_home = team_comp.get("home", {})
+    away_bullpen_factor = _bullpen_war_factor(tc_away.get("불펜WAR", ""))  # affects lambda_home
+    home_bullpen_factor = _bullpen_war_factor(tc_home.get("불펜WAR", ""))  # affects lambda_away
+
     # ── 최근 맞대결 보정 ──
     recent_matchup_away = team_comp.get("away", {}).get("최근 맞대결", "")
     recent_matchup_home = team_comp.get("home", {}).get("최근 맞대결", "")
@@ -224,14 +309,17 @@ def run_simulation(
     # ── λ 계산 ──
     # away_career_factor: away pitcher's career dominance vs home team → reduces lambda_home
     # home_career_factor: home pitcher's career dominance vs away team → reduces lambda_away
+    # park_f: 홈구장 파크팩터 → 양 팀 득점에 반영
+    # home_bullpen_factor: 홈팀 불펜 WAR → away 득점 감소
+    # away_bullpen_factor: 원정팀 불펜 WAR → home 득점 감소
     lambda_away = (
         away_rpg * away_era_factor * away_form * road_factor * danger_away * rm_away_factor
-        * home_career_factor
+        * home_career_factor * park_f * home_bullpen_factor
     )
     lambda_home = (
         home_rpg * home_era_factor * home_form * home_field_factor
         * HOME_ADVANTAGE * danger_home * rm_home_factor
-        * away_career_factor
+        * away_career_factor * park_f * away_bullpen_factor
     )
 
     lambda_away = max(2.0, min(10.0, lambda_away))
@@ -240,6 +328,10 @@ def run_simulation(
     # ── 포아송 시뮬레이션 ──
     away_scores = np.random.poisson(lambda_away, N_SIM)
     home_scores = np.random.poisson(lambda_home, N_SIM)
+
+    # 스코어 예측 범위 (25~75 백분위수)
+    away_p25, away_median, away_p75 = [int(x) for x in np.percentile(away_scores, [25, 50, 75])]
+    home_p25, home_median, home_p75 = [int(x) for x in np.percentile(home_scores, [25, 50, 75])]
 
     ties      = np.sum(away_scores == home_scores)
     away_wins = int(np.sum(away_scores > home_scores) + ties * 0.5)
@@ -271,12 +363,21 @@ def run_simulation(
         "confidence":          round(max(final_away, final_home), 1),
         "lambda_away":         round(float(lambda_away), 2),
         "lambda_home":         round(float(lambda_home), 2),
-        "away_pitcher":        away_pitcher,
-        "home_pitcher":        home_pitcher,
-        "away_pitcher_era":    away_pitcher_era,
-        "home_pitcher_era":    home_pitcher_era,
-        "pitcher_stats_away":  pitcher_stats_away,
-        "pitcher_stats_home":  pitcher_stats_home,
+        # 스코어 예측 범위 (25~75 백분위수)
+        "away_score_range":    (away_p25, away_median, away_p75),
+        "home_score_range":    (home_p25, home_median, home_p75),
+        # 파크팩터 / 불펜 WAR 정보
+        "park_factor":         round(park_f, 3),
+        "away_bullpen_factor": round(away_bullpen_factor, 3),
+        "home_bullpen_factor": round(home_bullpen_factor, 3),
+        "away_pitcher":         away_pitcher,
+        "home_pitcher":         home_pitcher,
+        "away_pitcher_era":     away_pitcher_era,
+        "home_pitcher_era":     home_pitcher_era,
+        "pitcher_stats_away":   pitcher_stats_away,
+        "pitcher_stats_home":   pitcher_stats_home,
+        "away_pitcher_ratios":  away_pitcher_ratios,
+        "home_pitcher_ratios":  home_pitcher_ratios,
         "h2h":                 h2h,
         "team_comp":           team_comp,
         "dangerous_batters":   dangerous,
@@ -300,6 +401,7 @@ def run_simulation(
             h2h_away_win_pct, h2h_home_win_pct,
             h2h_away_games, h2h_home_games,
             h2h_away_record, h2h_home_record,
+            park_f,
         ),
     }
 
@@ -312,6 +414,7 @@ def _build_factors(
     h2h_away_win_pct=None, h2h_home_win_pct=None,
     h2h_away_games=0, h2h_home_games=0,
     h2h_away_record="", h2h_home_record="",
+    park_factor=1.0,
 ) -> list[dict]:
     factors = []
 
@@ -435,6 +538,16 @@ def _build_factors(
                     "desc": f"{home_stat.streak} → {mood}",
                     "side": "home" if hs_ > 0 else "away",
                 })
+
+    # 7. 파크팩터 (유의미한 경우만)
+    if abs(park_factor - 1.0) >= 0.03:
+        pf_side = "away" if park_factor > 1.0 else "home"
+        pf_label = "타자 유리 구장" if park_factor > 1.0 else "투수 유리 구장"
+        factors.append({
+            "icon": "🏟️", "title": f"{home_team} 홈구장 파크팩터",
+            "desc": f"파크팩터 {park_factor:.2f} — {pf_label}",
+            "side": pf_side,
+        })
 
     return factors[:6]
 
