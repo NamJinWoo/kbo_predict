@@ -191,6 +191,18 @@ a { color: inherit; text-decoration: none; }
 .analysis-body li { margin-bottom: 4px; }
 .analysis-body p  { margin-bottom: 8px; }
 .analysis-body strong { color: #e2e8f0; }
+/* 완료경기 결과 분석 — 항상 노출 */
+.result-analysis {
+  padding: 12px 16px 16px;
+  font-size: 0.82rem; line-height: 1.7; color: #cbd5e1;
+  border-top: 1px solid #1e293b;
+}
+.result-analysis h2 { font-size: 0.88rem; color: #93c5fd; margin: 12px 0 6px; }
+.result-analysis h3 { font-size: 0.82rem; color: #7dd3fc; margin: 10px 0 4px; }
+.result-analysis ul { padding-left: 16px; }
+.result-analysis li { margin-bottom: 4px; }
+.result-analysis p  { margin-bottom: 8px; }
+.result-analysis strong { color: #e2e8f0; }
 
 /* 위협 타자 섹션 */
 .danger-section { padding: 0 16px 12px; }
@@ -560,7 +572,7 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
   {pit_html}
   {_prob_bar(away_pct, rg.away_team, rg.home_team)}
   {_danger_html(sim)}
-  {_analysis_accordion(analysis_html, idx, "예측 분석 보기 (왜 맞았는지/틀렸는지)")}
+  {f'<div class="result-analysis">{analysis_html}</div>' if analysis_html else ''}
   {boxscore_html}
 </div>"""
 
