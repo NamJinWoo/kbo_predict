@@ -382,20 +382,20 @@ def _danger_html(sim: dict) -> str:
     return rows
 
 
-def _analysis_accordion(analysis_html: str, idx: int, label: str = "경기 분석 보기") -> str:
+def _analysis_accordion(analysis_html: str, uid: str, label: str = "경기 분석 보기") -> str:
     if not analysis_html:
         return ""
     return f"""
-<button class="analysis-toggle" onclick="toggleAnalysis({idx})">
-  {label} <span id="arr-{idx}">▼</span>
+<button class="analysis-toggle" onclick="toggleAcc('{uid}')">
+  {label} <span id="arr-{uid}">▼</span>
 </button>
-<div class="analysis-body" id="ab-{idx}">
+<div class="analysis-body" id="ab-{uid}">
   {analysis_html}
 </div>
 <script>
-function toggleAnalysis(i) {{
-  var el = document.getElementById('ab-'+i);
-  var arr = document.getElementById('arr-'+i);
+function toggleAcc(id) {{
+  var el = document.getElementById('ab-'+id);
+  var arr = document.getElementById('arr-'+id);
   if (el.classList.contains('open')) {{
     el.classList.remove('open'); arr.textContent = '▼';
   }} else {{
@@ -522,8 +522,8 @@ function toggleBS(id) {{
 </script>"""
 
 
-def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
-                         boxscore_html: str, idx: int) -> str:
+def build_completed_card(rg: "RecentGame", sim: dict, result_html: str,
+                         pregame_html: str, boxscore_html: str, idx: int) -> str:
     away_score = rg.away_score or 0
     home_score = rg.home_score or 0
     away_win_cls = " winner" if away_score > home_score else ""
@@ -550,6 +550,10 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
         pit_html = f'<div class="pitchers">{"".join(tags)}</div>'
 
     away_pct = sim.get("away_win_pct", 50.0)
+    predicted = sim.get("predicted_winner", "")
+    actual = rg.away_team if away_score > home_score else (rg.home_team if home_score > away_score else "")
+    hit = predicted and actual and predicted == actual
+    result_label = ("✅ 예측 적중 분석" if hit else "❌ 예측 빗나감 분석") if (predicted and actual) else "예측 분석"
 
     return f"""
 <div class="game-card">
@@ -572,7 +576,8 @@ def build_completed_card(rg: "RecentGame", sim: dict, analysis_html: str,
   {pit_html}
   {_prob_bar(away_pct, rg.away_team, rg.home_team)}
   {_danger_html(sim)}
-  {f'<div class="result-analysis">{analysis_html}</div>' if analysis_html else ''}
+  {_analysis_accordion(result_html, f"r{idx}", result_label)}
+  {_analysis_accordion(pregame_html, f"a{idx}", "이전 경기 분석 보기")}
   {boxscore_html}
 </div>"""
 
@@ -634,7 +639,7 @@ def build_upcoming_card(tg: "TodayGame", sim: dict, analysis_html: str, idx: int
     </div>
   </div>
   {_danger_html(sim)}
-  {_analysis_accordion(analysis_html, idx)}
+  {_analysis_accordion(analysis_html, f"u{idx}")}
 </div>"""
 
 
@@ -658,20 +663,25 @@ def build_completed_page(game_date: date, games: list, team_stats: dict) -> str:
         else:
             sim = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
 
-        # 예측 vs 결과 분석 (왜 맞았는지/틀렸는지) 우선 사용
-        if rg.result_analysis:
-            ana_html = md_lib.markdown(rg.result_analysis, extensions=["extra", "nl2br"])
-        else:
-            ana_html = md_lib.markdown(
-                generate_analysis(sim, away_stat, home_stat), extensions=["extra", "nl2br"]
+        # 드롭다운 1: 예측 적중/빗나감 분석
+        result_html = md_lib.markdown(rg.result_analysis, extensions=["extra", "nl2br"]) if rg.result_analysis else ""
+
+        # 드롭다운 2: 사전 시뮬레이션 분석 (이전 경기 분석 보기)
+        # sim_json은 compact 저장이라 누락 키가 있을 수 있어 fresh 재실행
+        try:
+            fresh_sim = run_simulation(rg.away_team, rg.home_team, away_stat, home_stat, None)
+            pregame_html = md_lib.markdown(
+                generate_analysis(fresh_sim, away_stat, home_stat), extensions=["extra", "nl2br"]
             )
+        except Exception:
+            pregame_html = ""
 
         try:
             bs = scrape_game_boxscore(rg.game_date, rg.away_team, rg.home_team)
         except Exception:
             bs = {}
         bs_html = _boxscore_html(bs, rg.away_team, rg.home_team, idx)
-        cards_html += build_completed_card(rg, sim, ana_html, bs_html, idx)
+        cards_html += build_completed_card(rg, sim, result_html, pregame_html, bs_html, idx)
 
     body = f"""
 <div class="site-header">
