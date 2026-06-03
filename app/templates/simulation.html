@@ -297,6 +297,13 @@
             <td>{{ sim.lambda_away }}</td>
             <td>{{ sim.lambda_home }}</td>
           </tr>
+          {% if sim.recent_rpg_away is not none or sim.recent_rpg_home is not none %}
+          <tr title="시즌RPG 70% + 최근5경기 30% 블렌딩">
+            <td>최근5경기 평균득점</td>
+            <td>{{ sim.recent_rpg_away if sim.recent_rpg_away is not none else '-' }}</td>
+            <td>{{ sim.recent_rpg_home if sim.recent_rpg_home is not none else '-' }}</td>
+          </tr>
+          {% endif %}
           {% if sim.away_score_range and sim.home_score_range %}
           <tr class="sim-range-row">
             <td>득점 범위 (25~75%)</td>
@@ -375,9 +382,34 @@
       {% endif %}
       {% endif %}
 
+      <!-- 점수 분포 차트 -->
+      <div class="score-dist-section">
+        <h3 class="war-title">득점 분포 (포아송)</h3>
+        <canvas id="scoreDistChart" height="180"></canvas>
+        <div class="score-dist-legend">
+          <span class="sd-away-dot"></span> {{ sim.away_team }} (λ={{ sim.lambda_away }})
+          &nbsp;
+          <span class="sd-home-dot"></span> {{ sim.home_team }} (λ={{ sim.lambda_home }})
+        </div>
+      </div>
+
+      <!-- 피로도 배지 -->
+      {% if sim.fatigue_away_days is not none and sim.fatigue_away_days <= 4 %}
+      <div class="fatigue-badge">
+        ⚠️ {{ sim.away_pitcher }} 최근 {{ sim.fatigue_away_days }}일 전 등판
+        (피로도 계수 {{ sim.away_fatigue_factor }})
+      </div>
+      {% endif %}
+      {% if sim.fatigue_home_days is not none and sim.fatigue_home_days <= 4 %}
+      <div class="fatigue-badge">
+        ⚠️ {{ sim.home_pitcher }} 최근 {{ sim.fatigue_home_days }}일 전 등판
+        (피로도 계수 {{ sim.home_fatigue_factor }})
+      </div>
+      {% endif %}
+
       <div class="sim-note">
         <small>포아송 분포 기반 10,000회 몬테카를로.<br>
-        ERA·상대전적·위협타자OPS·홈원정·최근흐름·파크팩터·불펜WAR 반영.</small>
+        ERA·K-BB/9·피로도·상대전적·위협타자OPS·홈원정·최근흐름·파크팩터·불펜WAR 반영.</small>
       </div>
 
       <a href="{{ url_for('main.index') }}" class="btn-back-home">← 홈으로</a>
@@ -386,6 +418,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 function rerunSim() {
   const btn = document.querySelector('.btn-rerun');
@@ -393,5 +426,56 @@ function rerunSim() {
   btn.textContent = '계산 중…';
   location.reload();
 }
+
+(function() {
+  const lambdaAway = {{ sim.lambda_away }};
+  const lambdaHome = {{ sim.lambda_home }};
+  const MAX_SCORE  = 16;
+
+  function poissonPMF(lambda, k) {
+    let logP = k * Math.log(lambda) - lambda;
+    for (let i = 1; i <= k; i++) logP -= Math.log(i);
+    return Math.exp(logP);
+  }
+
+  const labels = Array.from({length: MAX_SCORE}, (_, i) => i);
+  const awayData = labels.map(k => poissonPMF(lambdaAway, k));
+  const homeData = labels.map(k => poissonPMF(lambdaHome, k));
+
+  const ctx = document.getElementById('scoreDistChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '{{ sim.away_team }}',
+          data: awayData.map(v => +(v * 100).toFixed(2)),
+          backgroundColor: 'rgba(99,179,237,0.6)',
+          borderColor: 'rgba(99,179,237,1)',
+          borderWidth: 1,
+        },
+        {
+          label: '{{ sim.home_team }}',
+          data: homeData.map(v => +(v * 100).toFixed(2)),
+          backgroundColor: 'rgba(252,129,74,0.6)',
+          borderColor: 'rgba(252,129,74,1)',
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+      },
+      scales: {
+        x: { title: { display: true, text: '득점', color: '#8892a4' }, ticks: { color: '#8892a4' }, grid: { color: '#2a2d3a' } },
+        y: { title: { display: true, text: '확률(%)', color: '#8892a4' }, ticks: { color: '#8892a4' }, grid: { color: '#2a2d3a' } },
+      },
+    },
+  });
+})();
 </script>
 {% endblock %}

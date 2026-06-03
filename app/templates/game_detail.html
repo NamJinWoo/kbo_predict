@@ -180,6 +180,53 @@
 
   {% endif %}{# cancel #}
 
+  <!-- 예측 시점 점수 분포 차트 -->
+  {% if recent and recent.sim_json %}
+  {% set sj = recent.sim_json | tojson | safe %}
+  <section class="gd-section">
+    <h2 class="gd-section-title">예측 시점 득점 분포</h2>
+    <canvas id="scoreDistChart" height="120"></canvas>
+    <div class="score-dist-legend" style="margin-top:.5rem;font-size:.8rem;color:#8892a4">
+      <span class="sd-away-dot"></span> {{ away_team }} &nbsp;
+      <span class="sd-home-dot"></span> {{ home_team }}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script>
+    (function() {
+      const simData = {{ recent.sim_json | safe }};
+      const la = simData.lambda_away, lh = simData.lambda_home;
+      if (!la || !lh) return;
+      const MAX = 16;
+      function pmf(lam, k) {
+        let logP = k * Math.log(lam) - lam;
+        for (let i = 1; i <= k; i++) logP -= Math.log(i);
+        return Math.exp(logP);
+      }
+      const labels = Array.from({length: MAX}, (_, i) => i);
+      const ctx = document.getElementById('scoreDistChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: '{{ away_team }}', data: labels.map(k => +(pmf(la,k)*100).toFixed(2)), backgroundColor:'rgba(99,179,237,0.6)', borderColor:'rgba(99,179,237,1)', borderWidth:1 },
+            { label: '{{ home_team }}', data: labels.map(k => +(pmf(lh,k)*100).toFixed(2)), backgroundColor:'rgba(252,129,74,0.6)', borderColor:'rgba(252,129,74,1)', borderWidth:1 },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}%` } } },
+          scales: {
+            x: { title:{display:true,text:'득점',color:'#8892a4'}, ticks:{color:'#8892a4'}, grid:{color:'#2a2d3a'} },
+            y: { title:{display:true,text:'확률(%)',color:'#8892a4'}, ticks:{color:'#8892a4'}, grid:{color:'#2a2d3a'} },
+          },
+        },
+      });
+    })();
+    </script>
+  </section>
+  {% endif %}
+
   <!-- 시뮬레이션 예측 결과 분석 -->
   {% if recent and recent.result_analysis %}
   <section class="gd-section gd-result-analysis">

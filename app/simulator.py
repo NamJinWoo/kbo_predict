@@ -12,8 +12,9 @@ from typing import Optional
 LEAGUE_AVG_ERA   = 4.50
 LEAGUE_AVG_RUNS  = 4.80
 LEAGUE_AVG_OPS   = 0.750
-HOME_ADVANTAGE   = 1.04
-N_SIM            = 10_000
+HOME_ADVANTAGE    = 1.01  # 홈어드밴티지 축소 (과잉보정 방지)
+N_SIM             = 10_000
+CONFIDENCE_SHRINK = 0.75  # 과잉확신 억제 (50% 방향으로 수렴)
 
 # KBO 구장별 파크팩터 (홈팀 기준, 1.0 = 리그 평균)
 # 1.0 초과: 타자 유리 구장, 1.0 미만: 투수 유리 구장
@@ -31,6 +32,7 @@ PARK_FACTORS: dict[str, float] = {
 }
 
 LEAGUE_AVG_BULLPEN_WAR = 3.0  # KBO 시즌 팀 불펜 WAR 리그 평균 추정치
+LEAGUE_AVG_K_BB_9      = 4.5  # KBO 리그 평균 K-BB/9
 
 TEAM_CODE_MAP = {
     "1001": "삼성", "2002": "KIA", "3001": "롯데", "5002": "LG",
@@ -167,16 +169,54 @@ def _park_factor(home_team: str) -> float:
 
 
 def _bullpen_war_factor(bullpen_war_str: str) -> float:
-    """불펜WAR 문자열 → λ 조정 계수 (0.92 ~ 1.08)
-    WAR이 높을수록 불펜이 좋음 → 상대 득점 감소 → factor < 1.0
-    """
+    """불펜WAR 문자열 → λ 조정 계수 (0.92 ~ 1.08)"""
     war = _parse_float(bullpen_war_str)
     if war is None:
         return 1.0
-    # 리그 평균 대비 편차로 ±8% 내에서 선형 조정
     delta = (war - LEAGUE_AVG_BULLPEN_WAR) / LEAGUE_AVG_BULLPEN_WAR
-    raw = 1.0 - delta * 0.25
-    return max(0.92, min(1.08, raw))
+    return max(0.92, min(1.08, 1.0 - delta * 0.25))
+
+
+def _bullpen_combined_factor(bullpen_war_str: str, team_era_str: str) -> float:
+    """불펜WAR + 팀ERA 복합 계수 (WAR 60% + 팀ERA 40%)
+    - WAR: 누적 기여도 기반 → 시즌 불펜 전력
+    - 팀ERA: 실제 실점 반영 → 선발+불펜 전반 수준
+    두 지표 교차 검증으로 단일 지표의 노이즈를 줄임
+    """
+    war_f = _bullpen_war_factor(bullpen_war_str)
+
+    team_era = _parse_float(team_era_str)
+    if team_era is None:
+        era_f = 1.0
+    else:
+        delta = (team_era - LEAGUE_AVG_ERA) / LEAGUE_AVG_ERA
+        era_f = max(0.93, min(1.07, 1.0 + delta * 0.18))
+
+    return war_f * 0.6 + era_f * 0.4
+
+
+def _kbb_form_factor(pitcher_ratios: dict) -> float:
+    """K-BB/9 기반 투수 폼 계수 (0.93 ~ 1.07)
+    K-BB/9 높을수록 투수 우세 → 상대 득점 감소 (factor < 1.0)
+    """
+    kbb9 = pitcher_ratios.get("K-BB/9")
+    if kbb9 is None:
+        return 1.0
+    delta = (kbb9 - LEAGUE_AVG_K_BB_9) / LEAGUE_AVG_K_BB_9
+    return max(0.93, min(1.07, 1.0 - delta * 0.15))
+
+
+def _fatigue_factor(days_since_last: Optional[int]) -> float:
+    """최근 등판 간격 기반 피로도 계수 (1.0 ~ 1.10)
+    짧을수록 투수 체력 부담 → 상대 득점 증가
+    """
+    if days_since_last is None:
+        return 1.0
+    if days_since_last <= 2:
+        return 1.10
+    if days_since_last <= 3:
+        return 1.05
+    return 1.0
 
 
 def _danger_factor(batters: list[dict]) -> float:
@@ -195,11 +235,18 @@ def run_simulation(
     away_stat,
     home_stat,
     game_info=None,
+    fatigue_away_days: Optional[int] = None,
+    fatigue_home_days: Optional[int] = None,
+    recent_rpg_away: Optional[float] = None,
+    recent_rpg_home: Optional[float] = None,
 ) -> dict:
     np.random.seed(None)
 
-    away_rpg  = (away_stat.runs_per_game         if away_stat else LEAGUE_AVG_RUNS)
-    home_rpg  = (home_stat.runs_per_game         if home_stat else LEAGUE_AVG_RUNS)
+    # ── D: 최근 5경기 득점 블렌딩 (시즌 70% + 최근 30%) ──
+    base_away_rpg = (away_stat.runs_per_game if away_stat else LEAGUE_AVG_RUNS)
+    base_home_rpg = (home_stat.runs_per_game if home_stat else LEAGUE_AVG_RUNS)
+    away_rpg = base_away_rpg * 0.80 + recent_rpg_away * 0.20 if recent_rpg_away is not None else base_away_rpg
+    home_rpg = base_home_rpg * 0.80 + recent_rpg_home * 0.20 if recent_rpg_home is not None else base_home_rpg
 
     away_pitcher = home_pitcher = ""
     away_pitcher_era = home_pitcher_era = None
@@ -226,6 +273,18 @@ def run_simulation(
 
     away_pitcher_ratios = _pitcher_ratios(pitcher_stats_away)
     home_pitcher_ratios = _pitcher_ratios(pitcher_stats_home)
+
+    # ── K/BB 폼 계수 (투수 → 상대팀 λ에 반영) ──
+    # away pitcher's K-BB/9 높으면 → lambda_home ↓
+    # home pitcher's K-BB/9 높으면 → lambda_away ↓
+    away_kbb_factor = _kbb_form_factor(away_pitcher_ratios)
+    home_kbb_factor = _kbb_form_factor(home_pitcher_ratios)
+
+    # ── 피로도 계수 (최근 등판 간격) ──
+    # away pitcher 피로 → lambda_home ↑ (홈팀이 득점 유리)
+    # home pitcher 피로 → lambda_away ↑ (원정팀이 득점 유리)
+    away_fatigue = _fatigue_factor(fatigue_away_days)
+    home_fatigue = _fatigue_factor(fatigue_home_days)
 
     # ── ERA factor (season) ──
     def era_factor(era: Optional[float]) -> float:
@@ -272,8 +331,8 @@ def run_simulation(
     # ── 홈/원정 전적 ──
     away_road_wpct = _win_pct_from_record(away_stat.away_record if away_stat else "")
     home_home_wpct = _win_pct_from_record(home_stat.home_record if home_stat else "")
-    road_factor       = max(0.7, min(1.3, (away_road_wpct / 0.5) if away_road_wpct else 1.0))
-    home_field_factor = max(0.7, min(1.3, (home_home_wpct / 0.5) if home_home_wpct else 1.0))
+    road_factor       = max(0.75, min(1.20, (away_road_wpct / 0.5) if away_road_wpct else 1.0))
+    home_field_factor = max(0.75, min(1.20, (home_home_wpct / 0.5) if home_home_wpct else 1.0))
 
     # ── 위험 타자 OPS 기반 보정 ──
     # vs_home_pitcher = away team's batters who hit well vs home pitcher → lambda_away up
@@ -284,13 +343,13 @@ def run_simulation(
     # ── 파크팩터 ──
     park_f = _park_factor(home_team)
 
-    # ── 불펜 WAR 보정 ──
-    # 원정팀 불펜WAR 높음 → 홈팀 후반 득점 감소 → lambda_home ↓
-    # 홈팀 불펜WAR 높음 → 원정팀 후반 득점 감소 → lambda_away ↓
+    # ── 불펜 WAR + 팀ERA 복합 보정 (E) ──
+    # 원정팀 불펜 강함 → 홈팀 후반 득점 감소 → lambda_home ↓
+    # 홈팀 불펜 강함 → 원정팀 후반 득점 감소 → lambda_away ↓
     tc_away = team_comp.get("away", {})
     tc_home = team_comp.get("home", {})
-    away_bullpen_factor = _bullpen_war_factor(tc_away.get("불펜WAR", ""))  # affects lambda_home
-    home_bullpen_factor = _bullpen_war_factor(tc_home.get("불펜WAR", ""))  # affects lambda_away
+    away_bullpen_factor = _bullpen_combined_factor(tc_away.get("불펜WAR", ""), tc_away.get("팀 평균자책", ""))
+    home_bullpen_factor = _bullpen_combined_factor(tc_home.get("불펜WAR", ""), tc_home.get("팀 평균자책", ""))
 
     # ── 최근 맞대결 보정 ──
     recent_matchup_away = team_comp.get("away", {}).get("최근 맞대결", "")
@@ -315,15 +374,17 @@ def run_simulation(
     lambda_away = (
         away_rpg * away_era_factor * away_form * road_factor * danger_away * rm_away_factor
         * home_career_factor * park_f * home_bullpen_factor
+        * home_kbb_factor * home_fatigue
     )
     lambda_home = (
         home_rpg * home_era_factor * home_form * home_field_factor
         * HOME_ADVANTAGE * danger_home * rm_home_factor
         * away_career_factor * park_f * away_bullpen_factor
+        * away_kbb_factor * away_fatigue
     )
 
-    lambda_away = max(2.0, min(10.0, lambda_away))
-    lambda_home = max(2.0, min(10.0, lambda_home))
+    lambda_away = max(2.5, min(10.0, lambda_away))
+    lambda_home = max(2.5, min(10.0, lambda_home))
 
     # ── 포아송 시뮬레이션 ──
     away_scores = np.random.poisson(lambda_away, N_SIM)
@@ -351,7 +412,11 @@ def run_simulation(
     final_home = sim_home_pct * 0.70 + r10_home * 0.30
 
     total = final_away + final_home
-    final_away = round(final_away / total * 100, 1)
+    final_away = final_away / total * 100
+    final_home = 100 - final_away
+
+    # ── C: Shrinkage — 과잉확신 억제 (50%로 수렴) ──
+    final_away = round(50 + (final_away - 50) * CONFIDENCE_SHRINK, 1)
     final_home = round(100 - final_away, 1)
 
     return {
@@ -370,6 +435,16 @@ def run_simulation(
         "park_factor":         round(park_f, 3),
         "away_bullpen_factor": round(away_bullpen_factor, 3),
         "home_bullpen_factor": round(home_bullpen_factor, 3),
+        "recent_rpg_away":     round(recent_rpg_away, 2) if recent_rpg_away is not None else None,
+        "recent_rpg_home":     round(recent_rpg_home, 2) if recent_rpg_home is not None else None,
+        "blended_rpg_away":    round(away_rpg, 2),
+        "blended_rpg_home":    round(home_rpg, 2),
+        "away_kbb_factor":     round(away_kbb_factor, 3),
+        "home_kbb_factor":     round(home_kbb_factor, 3),
+        "away_fatigue_factor": round(away_fatigue, 3),
+        "home_fatigue_factor": round(home_fatigue, 3),
+        "fatigue_away_days":   fatigue_away_days,
+        "fatigue_home_days":   fatigue_home_days,
         "away_pitcher":         away_pitcher,
         "home_pitcher":         home_pitcher,
         "away_pitcher_era":     away_pitcher_era,

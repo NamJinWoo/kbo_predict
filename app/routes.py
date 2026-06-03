@@ -1,15 +1,60 @@
 from flask import Blueprint, render_template, request, redirect, url_for, jsonify
 from app import db
 from app.models import Prediction, TeamStat, TodayGame, RecentGame
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 import markdown
 import json
 import subprocess
 import threading
 from pathlib import Path
+from collections import defaultdict
 
 main = Blueprint("main", __name__)
+
+FANDOM_TEAM = "삼성"
+TEAMS_ORDER = ["삼성", "KIA", "롯데", "LG", "두산", "한화", "SSG", "키움", "NC", "KT"]
+
+
+def _samsung_first(games, attr1="away_team", attr2="home_team"):
+    """삼성 경기를 목록 맨 앞으로 정렬"""
+    priority = [g for g in games if getattr(g, attr1) == FANDOM_TEAM or getattr(g, attr2) == FANDOM_TEAM]
+    others   = [g for g in games if g not in priority]
+    return priority + others
+
+
+def _recent_rpg(team: str, before_date: date, n: int = 7, min_games: int = 4) -> Optional[float]:
+    """최근 n경기 실제 득점 평균 (D: 최근폼 블렌딩용)
+    - min_games 미만이면 None 반환 (이상값 방지)
+    - 리그 평균의 ±40% 이내로 클램핑 (단일 폭발 게임 영향 억제)
+    """
+    games = RecentGame.query.filter(
+        RecentGame.game_date < before_date,
+        db.or_(RecentGame.away_team == team, RecentGame.home_team == team),
+        RecentGame.away_score.isnot(None),
+    ).order_by(RecentGame.game_date.desc()).limit(n).all()
+    if len(games) < min_games:
+        return None
+    scores = [g.away_score if g.away_team == team else g.home_score for g in games]
+    avg = sum(scores) / len(scores)
+    from app.simulator import LEAGUE_AVG_RUNS
+    return max(LEAGUE_AVG_RUNS * 0.6, min(LEAGUE_AVG_RUNS * 1.6, avg))
+
+
+def _pitcher_days_since_last_start(pitcher_name: str, before_date: date) -> Optional[int]:
+    """RecentGame에서 투수의 마지막 등판일을 조회해 간격(일) 반환"""
+    if not pitcher_name:
+        return None
+    recent = RecentGame.query.filter(
+        RecentGame.game_date < before_date,
+        db.or_(
+            RecentGame.win_pitcher  == pitcher_name,
+            RecentGame.lose_pitcher == pitcher_name,
+        ),
+    ).order_by(RecentGame.game_date.desc()).first()
+    if recent:
+        return (before_date - recent.game_date).days
+    return None
 
 
 @main.route("/")
@@ -55,6 +100,9 @@ def index():
                 seen.add(key)
                 upcoming_games.append(g)
 
+    recent_games   = _samsung_first(recent_games)
+    upcoming_games = _samsung_first(upcoming_games)
+
     from app.scraper import STADIUM_MAP
     return render_template(
         "index.html",
@@ -63,6 +111,7 @@ def index():
         recent_games=recent_games,
         upcoming_games=upcoming_games,
         stadium_map=STADIUM_MAP,
+        fandom_team=FANDOM_TEAM,
     )
 
 
@@ -166,8 +215,20 @@ def simulate():
         .first()
     )
 
+    fatigue_away_days = fatigue_home_days = None
+    if game_info:
+        fatigue_away_days = _pitcher_days_since_last_start(game_info.away_pitcher, gd)
+        fatigue_home_days = _pitcher_days_since_last_start(game_info.home_pitcher, gd)
+
+    recent_away = _recent_rpg(away, gd)
+    recent_home = _recent_rpg(home, gd)
+
     from app.simulator import run_simulation, generate_analysis
-    sim = run_simulation(away, home, away_stat, home_stat, game_info)
+    sim = run_simulation(away, home, away_stat, home_stat, game_info,
+                         fatigue_away_days=fatigue_away_days,
+                         fatigue_home_days=fatigue_home_days,
+                         recent_rpg_away=recent_away,
+                         recent_rpg_home=recent_home)
     analysis = generate_analysis(sim, away_stat, home_stat)
     html_analysis = markdown.markdown(analysis, extensions=["extra", "nl2br"])
 
@@ -198,7 +259,6 @@ def stats():
     ).order_by(RecentGame.game_date.asc()).all()
 
     # 월별 집계
-    from collections import defaultdict
     monthly: dict[str, dict] = defaultdict(lambda: {"total": 0, "correct": 0})
     for g in sim_games:
         if g.game_date:
@@ -231,12 +291,44 @@ def stats():
         b["correct"] = sum(1 for g in bucket_games if g.predicted_winner == g.winner)
         b["accuracy"] = round(b["correct"] / b["total"] * 100, 1) if b["total"] else None
 
+    # 팀별 예측 적중률
+    team_acc_map: dict = defaultdict(lambda: {"total": 0, "correct": 0, "home_total": 0, "home_correct": 0})
+    for g in sim_games:
+        for team, is_home in [(g.away_team, False), (g.home_team, True)]:
+            team_acc_map[team]["total"] += 1
+            if g.predicted_winner == g.winner:
+                team_acc_map[team]["correct"] += 1
+            if is_home:
+                team_acc_map[team]["home_total"] += 1
+                if g.predicted_winner == g.winner:
+                    team_acc_map[team]["home_correct"] += 1
+
+    team_accuracy_list = []
+    for team in TEAMS_ORDER:
+        if team not in team_acc_map:
+            continue
+        d = team_acc_map[team]
+        away_total   = d["total"]   - d["home_total"]
+        away_correct = d["correct"] - d["home_correct"]
+        team_accuracy_list.append({
+            "team":          team,
+            "total":         d["total"],
+            "correct":       d["correct"],
+            "accuracy":      round(d["correct"] / d["total"] * 100, 1) if d["total"] else None,
+            "home_total":    d["home_total"],
+            "home_correct":  d["home_correct"],
+            "home_accuracy": round(d["home_correct"] / d["home_total"] * 100, 1) if d["home_total"] else None,
+            "away_total":    away_total,
+            "away_correct":  away_correct,
+            "away_accuracy": round(away_correct / away_total * 100, 1) if away_total else None,
+        })
+
     # 팀 상성 히트맵 (RecentGame 전체 기록 기반)
     all_games = RecentGame.query.filter(
         RecentGame.away_score.isnot(None),
         RecentGame.home_score.isnot(None),
     ).all()
-    TEAMS = ["삼성", "KIA", "롯데", "LG", "두산", "한화", "SSG", "키움", "NC", "KT"]
+    TEAMS = TEAMS_ORDER
     h2h_matrix: dict[tuple, dict] = defaultdict(lambda: {"wins": 0, "total": 0})
     for g in all_games:
         away, home, winner = g.away_team, g.home_team, g.winner
@@ -281,6 +373,8 @@ def stats():
         confidence_buckets=confidence_buckets,
         heatmap=heatmap,
         heatmap_teams=TEAMS,
+        team_accuracy_list=team_accuracy_list,
+        fandom_team=FANDOM_TEAM,
     )
 
 
@@ -639,7 +733,10 @@ def _attach_result_analysis(rg: "RecentGame", r: dict) -> None:
         .first()
     )
 
-    sim = run_simulation(r["away_team"], r["home_team"], away_ts, home_ts, today_game)
+    away_recent = _recent_rpg(r["away_team"], r["game_date"])
+    home_recent = _recent_rpg(r["home_team"], r["game_date"])
+    sim = run_simulation(r["away_team"], r["home_team"], away_ts, home_ts, today_game,
+                         recent_rpg_away=away_recent, recent_rpg_home=home_recent)
 
     rg.predicted_winner = sim["predicted_winner"]
     rg.sim_confidence   = sim["confidence"]
@@ -665,4 +762,58 @@ def _attach_result_analysis(rg: "RecentGame", r: dict) -> None:
         home_score,
         win_pitcher=r.get("win_pitcher", ""),
         lose_pitcher=r.get("lose_pitcher", ""),
+    )
+
+
+@main.route("/calendar")
+@main.route("/calendar/<int:year>/<int:month>")
+def calendar_view(year=None, month=None):
+    import calendar as cal_module
+
+    today = date.today()
+    if year is None:
+        year = today.year
+    if month is None:
+        month = today.month
+
+    year  = max(2020, min(2030, year))
+    month = max(1,    min(12,   month))
+
+    from_date = date(year, month, 1)
+    if month == 12:
+        to_date = date(year + 1, 1, 1)
+    else:
+        to_date = date(year, month + 1, 1)
+
+    games = RecentGame.query.filter(
+        RecentGame.game_date >= from_date,
+        RecentGame.game_date < to_date,
+        RecentGame.away_score.isnot(None),
+    ).order_by(RecentGame.game_date).all()
+
+    games_by_day: dict[int, list] = defaultdict(list)
+    for g in games:
+        games_by_day[g.game_date.day].append(g)
+
+    # 삼성 경기를 각 날짜 내에서 맨 앞으로
+    for day in games_by_day:
+        lst = games_by_day[day]
+        samsung = [g for g in lst if g.away_team == FANDOM_TEAM or g.home_team == FANDOM_TEAM]
+        others  = [g for g in lst if g not in samsung]
+        games_by_day[day] = samsung + others
+
+    prev_month = month - 1 if month > 1 else 12
+    prev_year  = year      if month > 1 else year - 1
+    next_month = month + 1 if month < 12 else 1
+    next_year  = year      if month < 12 else year + 1
+
+    return render_template(
+        "calendar.html",
+        year=year, month=month,
+        cal=cal_module.monthcalendar(year, month),
+        games_by_day=games_by_day,
+        prev_year=prev_year, prev_month=prev_month,
+        next_year=next_year, next_month=next_month,
+        month_name=f"{year}년 {month}월",
+        fandom_team=FANDOM_TEAM,
     )

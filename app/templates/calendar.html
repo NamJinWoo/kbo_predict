@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}경기 캘린더 — {{ month_name }}{% endblock %}
+
+{% block content %}
+<div class="cal-page">
+
+  <div class="cal-header">
+    <a href="{{ url_for('main.calendar_view', year=prev_year, month=prev_month) }}" class="cal-nav">‹</a>
+    <h1 class="cal-title">{{ month_name }}</h1>
+    <a href="{{ url_for('main.calendar_view', year=next_year, month=next_month) }}" class="cal-nav">›</a>
+  </div>
+
+  <div class="cal-legend">
+    <span class="cl-dot cl-correct"></span> 적중
+    <span class="cl-dot cl-wrong"></span> 빗나감
+    <span class="cl-dot cl-nopred"></span> 예측 없음
+  </div>
+
+  <table class="cal-table">
+    <thead>
+      <tr>
+        {% for day in ['일','월','화','수','목','금','토'] %}
+        <th class="cal-dow {% if loop.index0 == 0 %}dow-sun{% elif loop.index0 == 6 %}dow-sat{% endif %}">{{ day }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in cal %}
+      <tr>
+        {% for day in week %}
+        <td class="cal-cell {% if day == 0 %}cal-empty{% endif %}">
+          {% if day != 0 %}
+          <div class="cal-day-num">{{ day }}</div>
+          {% set day_games = games_by_day.get(day, []) %}
+          {% for g in day_games %}
+          <a href="{{ url_for('main.game_detail', game_date='%04d-%02d-%02d' % (year, month, day), away_team=g.away_team, home_team=g.home_team) }}"
+             class="cal-game
+               {%- if g.away_team == fandom_team or g.home_team == fandom_team %} cal-samsung{% endif %}
+               {%- if g.predicted_winner %}{% if g.predicted_winner == g.winner %} cal-correct{% else %} cal-wrong{% endif %}{% else %} cal-nopred{% endif %}">
+            <span class="cal-game-away {% if g.winner == g.away_team %}cal-winner{% endif %}{% if g.away_team == fandom_team %} samsung-name{% endif %}">{{ g.away_team }}</span>
+            <span class="cal-score">{{ g.away_score }}:{{ g.home_score }}</span>
+            <span class="cal-game-home {% if g.winner == g.home_team %}cal-winner{% endif %}{% if g.home_team == fandom_team %} samsung-name{% endif %}">{{ g.home_team }}</span>
+          </a>
+          {% endfor %}
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% set month_games = [] %}
+  {% for day_list in games_by_day.values() %}{% for g in day_list %}{% if month_games.append(g) %}{% endif %}{% endfor %}{% endfor %}
+  {% set samsung_games = month_games | selectattr('away_team', 'eq', fandom_team) | list + (month_games | selectattr('home_team', 'eq', fandom_team) | list) %}
+
+  {% if samsung_games %}
+  <section class="cal-summary">
+    <h2>삼성 라이온즈 이달 결과</h2>
+    <div class="result-cards">
+      {% set seen_ids = namespace(ids=[]) %}
+      {% for g in month_games %}
+      {% if (g.away_team == fandom_team or g.home_team == fandom_team) and g.id not in seen_ids.ids %}
+      {% if seen_ids.ids.append(g.id) %}{% endif %}
+      <a href="{{ url_for('main.game_detail', game_date=g.game_date.isoformat(), away_team=g.away_team, home_team=g.home_team) }}"
+         class="result-card result-card-link card-samsung">
+        <div class="rc-date">{{ g.game_date.strftime('%m.%d') }}</div>
+        <div class="rc-teams">
+          <span class="rc-team {% if g.winner == g.away_team %}rc-winner{% endif %}{% if g.away_team == fandom_team %} samsung-name{% endif %}">{{ g.away_team }}</span>
+          <span class="rc-score">{{ g.away_score }} : {{ g.home_score }}</span>
+          <span class="rc-team {% if g.winner == g.home_team %}rc-winner{% endif %}{% if g.home_team == fandom_team %} samsung-name{% endif %}">{{ g.home_team }}</span>
+        </div>
+        <div class="rc-info">
+          {% if g.win_pitcher %}<span class="rc-tag win">승 {{ g.win_pitcher }}</span>{% endif %}
+          {% if g.save_pitcher %}<span class="rc-tag save">S {{ g.save_pitcher }}</span>{% endif %}
+          {% if g.lose_pitcher %}<span class="rc-tag lose">패 {{ g.lose_pitcher }}</span>{% endif %}
+        </div>
+        {% if g.predicted_winner %}
+        <div class="rc-pred-row">
+          {% if g.predicted_winner == g.winner %}
+          <span class="rc-pred-badge correct">✅ 적중</span>
+          {% else %}
+          <span class="rc-pred-badge wrong">❌ 빗나감</span>
+          {% endif %}
+          <span class="rc-pred-detail">예측: {{ g.predicted_winner }}
+            {%- if g.sim_confidence %} ({{ g.sim_confidence | round(0) | int }}%){% endif %}</span>
+        </div>
+        {% endif %}
+      </a>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -55,6 +55,47 @@
 </section>
 {% endif %}
 
+<!-- 팀별 예측 적중률 -->
+{% if team_accuracy_list %}
+<section class="stats-section">
+  <h2>팀별 시뮬레이션 예측 적중률</h2>
+  <div class="table-wrap">
+    <table class="standings-table team-acc-table">
+      <thead>
+        <tr>
+          <th>팀</th>
+          <th>전체 (예측/적중)</th>
+          <th>전체 적중률</th>
+          <th>홈 (예측/적중)</th>
+          <th>홈 적중률</th>
+          <th>원정 (예측/적중)</th>
+          <th>원정 적중률</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in team_accuracy_list %}
+        <tr class="{% if t.team == fandom_team %}row-samsung{% endif %}">
+          <td class="team-name{% if t.team == fandom_team %} samsung-name{% endif %}">{{ t.team }}</td>
+          <td>{{ t.total }}경기 / {{ t.correct }}적중</td>
+          <td class="win-pct {% if t.accuracy is not none and t.accuracy >= 60 %}ta-good{% elif t.accuracy is not none and t.accuracy < 50 %}ta-bad{% endif %}">
+            {{ t.accuracy if t.accuracy is not none else '-' }}%
+          </td>
+          <td>{{ t.home_total }}경기 / {{ t.home_correct }}적중</td>
+          <td class="{% if t.home_accuracy is not none and t.home_accuracy >= 60 %}ta-good{% elif t.home_accuracy is not none and t.home_accuracy < 50 %}ta-bad{% endif %}">
+            {{ t.home_accuracy if t.home_accuracy is not none else '-' }}%
+          </td>
+          <td>{{ t.away_total }}경기 / {{ t.away_correct }}적중</td>
+          <td class="{% if t.away_accuracy is not none and t.away_accuracy >= 60 %}ta-good{% elif t.away_accuracy is not none and t.away_accuracy < 50 %}ta-bad{% endif %}">
+            {{ t.away_accuracy if t.away_accuracy is not none else '-' }}%
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 <!-- 팀 상성 히트맵 -->
 {% if heatmap %}
 <section class="stats-section">

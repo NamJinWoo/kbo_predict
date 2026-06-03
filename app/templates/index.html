@@ -38,9 +38,9 @@
         </thead>
         <tbody>
           {% for s in standings %}
-          <tr class="{% if loop.index <= 5 %}playoffs{% endif %}">
+          <tr class="{% if loop.index <= 5 %}playoffs{% endif %}{% if s.team == fandom_team %} row-samsung{% endif %}">
             <td class="rank">{{ s.rank }}</td>
-            <td class="team-name">{{ s.team }}</td>
+            <td class="team-name{% if s.team == fandom_team %} samsung-name{% endif %}">{{ s.team }}</td>
             <td>{{ s.games }}</td>
             <td>{{ s.wins }}</td>
             <td>{{ s.draws }}</td>
@@ -84,11 +84,11 @@
       <div class="result-cards">
         {% for g in recent_games %}
         <a href="{{ url_for('main.game_detail', game_date=g.game_date.isoformat(), away_team=g.away_team, home_team=g.home_team) }}"
-           class="result-card result-card-link">
+           class="result-card result-card-link{% if g.away_team == fandom_team or g.home_team == fandom_team %} card-samsung{% endif %}">
           <div class="rc-teams">
-            <span class="rc-team {% if g.winner == g.away_team %}rc-winner{% endif %}">{{ g.away_team }}</span>
+            <span class="rc-team {% if g.winner == g.away_team %}rc-winner{% endif %}{% if g.away_team == fandom_team %} samsung-name{% endif %}">{{ g.away_team }}</span>
             <span class="rc-score">{{ g.away_score }} : {{ g.home_score }}</span>
-            <span class="rc-team {% if g.winner == g.home_team %}rc-winner{% endif %}">{{ g.home_team }}</span>
+            <span class="rc-team {% if g.winner == g.home_team %}rc-winner{% endif %}{% if g.home_team == fandom_team %} samsung-name{% endif %}">{{ g.home_team }}</span>
           </div>
           <div class="rc-info">
             {% if g.win_pitcher %}<span class="rc-tag win">승 {{ g.win_pitcher }}</span>{% endif %}
@@ -130,11 +130,11 @@
       <div class="game-cards">
         {% for g in upcoming_games %}
         <a href="{{ url_for('main.simulate', away=g.away_team, home=g.home_team, date=g.game_date.isoformat()) }}"
-           class="game-card">
+           class="game-card{% if g.away_team == fandom_team or g.home_team == fandom_team %} card-samsung{% endif %}">
           <div class="game-card-teams">
-            <span class="gc-team away">{{ g.away_team }}</span>
+            <span class="gc-team away{% if g.away_team == fandom_team %} samsung-name{% endif %}">{{ g.away_team }}</span>
             <span class="gc-vs">vs</span>
-            <span class="gc-team home">{{ g.home_team }}</span>
+            <span class="gc-team home{% if g.home_team == fandom_team %} samsung-name{% endif %}">{{ g.home_team }}</span>
           </div>
           <div class="game-card-pitchers">
             <span>{{ g.away_pitcher or '미정' }}</span>
