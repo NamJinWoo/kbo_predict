@@ -41,6 +41,9 @@
       <span class="verdict-conf">{{ sim.confidence }}% 우세</span>
       <button class="btn-rerun" onclick="rerunSim()" title="다시 시뮬레이션">↺ 재시뮬레이션</button>
     </div>
+    {% if not sim.away_pitcher or not sim.home_pitcher %}
+    <div class="pitcher-warn">⚠ 선발 미정 — 투수 데이터 없이 계산된 예측으로 신뢰도가 낮습니다</div>
+    {% endif %}
   </div>
 
   <div class="sim-body">

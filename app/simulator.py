@@ -721,27 +721,8 @@ def _claude_analysis(sim: dict, away_stat, home_stat, api_key: str) -> str:
             if av or hv:
                 tc_block += f"  {key}: {away} {av} vs {home} {hv}\n"
 
-    prompt = f"""당신은 KBO 프로야구 전문 분석가입니다.
-
-경기: {away}(원정) @ {home}(홈)
-
-[몬테카를로 시뮬레이션 — {sim['n_sim']:,}회]
-- {away} 승리 확률: {sim['away_win_pct']}%
-- {home} 승리 확률: {sim['home_win_pct']}%
-- 예상 득점: {away} {sim['lambda_away']}점 / {home} {sim['lambda_home']}점
-
-[선발 투수]{pitcher_block if pitcher_block else ' 미정'}
-{h2h_block}
-[팀 성적]
-{stat_block(away, away_stat, '원정')}
-{stat_block(home, home_stat, '홈')}
-{tc_block}
-[위험 타자]{danger_block if danger_block else ' 데이터 없음'}
-
-[주요 요인]
-{chr(10).join(f'- {f["icon"]} {f["title"]}: {f["desc"]}' for f in sim['factors'])}
-
-위 모든 데이터를 종합하여 분석해주세요:
+    system_text = """당신은 KBO 프로야구 전문 분석가입니다.
+제공되는 몬테카를로 시뮬레이션 데이터와 팀/투수 스탯을 바탕으로 아래 형식으로 분석하세요.
 
 ## 핵심 포인트
 (3가지 불릿 — 이 경기의 핵심 관전 포인트)
@@ -763,11 +744,30 @@ def _claude_analysis(sim: dict, away_stat, home_stat, api_key: str) -> str:
 
 전문적이고 날카롭게, 구체적 수치를 인용하며 작성하세요."""
 
+    user_content = f"""경기: {away}(원정) @ {home}(홈)
+
+[몬테카를로 시뮬레이션 — {sim['n_sim']:,}회]
+- {away} 승리 확률: {sim['away_win_pct']}%
+- {home} 승리 확률: {sim['home_win_pct']}%
+- 예상 득점: {away} {sim['lambda_away']}점 / {home} {sim['lambda_home']}점
+
+[선발 투수]{pitcher_block if pitcher_block else ' 미정'}
+{h2h_block}
+[팀 성적]
+{stat_block(away, away_stat, '원정')}
+{stat_block(home, home_stat, '홈')}
+{tc_block}
+[위험 타자]{danger_block if danger_block else ' 데이터 없음'}
+
+[주요 요인]
+{chr(10).join(f'- {f["icon"]} {f["title"]}: {f["desc"]}' for f in sim['factors'])}"""
+
     client = anthropic.Anthropic(api_key=api_key)
     resp = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
+        system=[{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": user_content}],
     )
     return resp.content[0].text
 
@@ -1054,8 +1054,22 @@ def _claude_result_analysis(
     era_away = sim.get("away_pitcher_era") or "-"
     era_home = sim.get("home_pitcher_era") or "-"
 
-    prompt = (
-        "당신은 KBO 프로야구 예측 분석 전문가입니다.\n\n"
+    system_text = (
+        "당신은 KBO 프로야구 예측 분석 전문가입니다.\n"
+        "시뮬레이션 예측과 실제 경기 결과를 비교하여 아래 형식으로 분석하세요.\n\n"
+        f"## {header_label}\n\n"
+        f"**예측**: {predicted} 승 ({sim['confidence']}%) → **실제**: {actual_winner} 승 ({away_score}:{home_score})\n\n"
+        "### 예측 득점 정확도\n"
+        "(예측 λ vs 실제 스코어 비교, 어느 팀 득점이 더 잘/못 맞았는지)\n\n"
+        f"### {factor_section}\n"
+        f"{factor_hint}\n\n"
+        f"### {mvp_section}\n"
+        f"{mvp_hint}"
+        f"{improvement_block}\n\n"
+        "간결하고 날카롭게, 구체적 수치를 인용하여 작성하세요."
+    )
+
+    user_content = (
         f"경기: {away}(원정) {away_score} - {home_score} {home}(홈)\n"
         f"실제 승리: {actual_winner}\n\n"
         "[시뮬레이션 예측]\n"
@@ -1070,25 +1084,15 @@ def _claude_result_analysis(
         f"[투수 통산 상대 성적]{career_block if career_block else ' 없음'}\n\n"
         "[실제 투수 결과]\n"
         f"- 승리투수: {win_pitcher or '-'}\n"
-        f"- 패전투수: {lose_pitcher or '-'}\n\n"
-        "위 데이터를 바탕으로 아래 형식으로 분석해주세요:\n\n"
-        f"## {header_label}\n\n"
-        f"**예측**: {predicted} 승 ({sim['confidence']}%) → **실제**: {actual_winner} 승 ({away_score}:{home_score})\n\n"
-        "### 예측 득점 정확도\n"
-        "(예측 λ vs 실제 스코어 비교, 어느 팀 득점이 더 잘/못 맞았는지)\n\n"
-        f"### {factor_section}\n"
-        f"{factor_hint}\n\n"
-        f"### {mvp_section}\n"
-        f"{mvp_hint}"
-        f"{improvement_block}\n\n"
-        "간결하고 날카롭게, 구체적 수치를 인용하여 작성하세요."
+        f"- 패전투수: {lose_pitcher or '-'}"
     )
 
     client = anthropic.Anthropic(api_key=api_key)
     resp = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1000,
-        messages=[{"role": "user", "content": prompt}],
+        system=[{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": user_content}],
     )
     return resp.content[0].text
 

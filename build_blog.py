@@ -113,6 +113,7 @@ a { color: inherit; text-decoration: none; }
 .pred-hit  { background: #14532d; color: #4ade80; }
 .pred-miss { background: #450a0a; color: #f87171; }
 .pred-none { background: #1e293b; color: #64748b; }
+.pred-warn { background: #422006; color: #fb923c; }
 
 /* 승패 투수 */
 .pitchers {
@@ -599,6 +600,9 @@ def build_upcoming_card(tg: "TodayGame", sim: dict, analysis_html: str, idx: int
     la = sim.get("lambda_away", 0)
     lh = sim.get("lambda_home", 0)
 
+    no_pitcher = (away_pitcher == "미정" or home_pitcher == "미정")
+    warn_html = '<span class="pred-badge pred-warn">⚠ 선발 미정 — 신뢰도 낮음</span>' if no_pitcher else ''
+
     return f"""
 <div class="game-card">
   <div class="matchup">
@@ -609,6 +613,7 @@ def build_upcoming_card(tg: "TodayGame", sim: dict, analysis_html: str, idx: int
     <div class="vs-col">
       <div class="vs-text">VS</div>
       {'<span class="pred-badge pred-hit">'+winner+' 예상 '+str(confidence)+'%</span>' if winner else ''}
+      {warn_html}
     </div>
     <div class="team-block">
       <div class="team-role">홈</div>
