@@ -1,0 +1,71 @@
+name: Daily KBO Update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout kbo_predict (DB 포함)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Clone GitHub Pages blog repo
+        run: |
+          git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/NamJinWoo/NamJinWoo.github.io.git /tmp/blog
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Scrape & build blog
+        env:
+          BLOG_ROOT: /tmp/blog
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python build_blog.py
+
+      - name: Commit updated DB back to kbo_predict
+        run: |
+          git add data/kbo.db
+          git diff --cached --quiet || git commit -m "chore: daily DB update $(date +'%Y-%m-%d')"
+          git push
+
+      - name: Telegram 완료 알림
+        if: success()
+        run: |
+          DATE=$(date +'%Y-%m-%d %H:%M KST' --date='+9 hours')
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=✅ *KBO 일일 업데이트 완료*
+
+📅 ${DATE}
+⚾ 경기 결과 및 예측 업데이트
+🎯 배트맨 분석 갱신
+🦁 삼성 현황 갱신
+
+🔗 https://namjinwoo.github.io/kbo/"
+
+      - name: Telegram 실패 알림
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=❌ *KBO 업데이트 실패*
+
+오늘 자동 빌드가 실패했습니다.
+확인: https://github.com/NamJinWoo/kbo_predict/actions"
