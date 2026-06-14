@@ -1,0 +1,43 @@
+name: Daily KBO Update
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 매일 오전 10시 KST (UTC+9 → UTC 01:00)
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout kbo_predict (DB 포함)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Clone GitHub Pages blog repo
+        run: |
+          git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/NamJinWoo/NamJinWoo.github.io.git /tmp/blog
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Scrape & build blog
+        env:
+          BLOG_ROOT: /tmp/blog
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python build_blog.py
+
+      - name: Commit updated DB back to kbo_predict
+        run: |
+          git add data/kbo.db
+          git diff --cached --quiet || git commit -m "chore: daily DB update $(date +'%Y-%m-%d')"
+          git push

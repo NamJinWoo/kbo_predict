@@ -456,10 +456,23 @@ def game_detail(game_date: str, away_team: str, home_team: str):
     )
 
 
+RETENTION_DAYS = 30  # RecentGame 보관 기간
+
+
 @main.route("/admin/scrape", methods=["POST"])
 def admin_scrape():
     now = datetime.utcnow()
     scraped = 0
+
+    # ── 사전 정리 ──────────────────────────────────────────────
+    # TeamStat: 이전 스크래핑 전체 삭제 (최신 1회분만 유지)
+    TeamStat.query.delete()
+    # RecentGame: 30일 초과분 삭제
+    cutoff = date.today() - timedelta(days=RETENTION_DAYS)
+    RecentGame.query.filter(RecentGame.game_date < cutoff).delete()
+    # TodayGame: 오늘 이전 날짜 삭제
+    TodayGame.query.filter(TodayGame.game_date < date.today()).delete()
+    db.session.flush()
 
     try:
         from app.scraper import scrape_all

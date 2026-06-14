@@ -16,7 +16,7 @@ from app.models import RecentGame, TodayGame, TeamStat
 from app.simulator import run_simulation, generate_analysis
 import markdown as md_lib
 
-BLOG_ROOT = Path("/Users/jinwoo/githubBlog")
+BLOG_ROOT = Path(os.environ.get("BLOG_ROOT", "/Users/jinwoo/githubBlog"))
 OUT_DIR   = BLOG_ROOT / "kbo"
 
 
