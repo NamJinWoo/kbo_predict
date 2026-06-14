@@ -47,24 +47,17 @@ jobs:
         if: success()
         run: |
           DATE=$(date +'%Y-%m-%d %H:%M KST' --date='+9 hours')
+          TEXT=$(printf '✅ *KBO 일일 업데이트 완료*\n\n📅 %s\n⚾ 경기 결과 및 예측 업데이트\n🎯 배트맨 분석 갱신\n🦁 삼성 현황 갱신\n\n🔗 https://namjinwoo.github.io/kbo/' "$DATE")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "parse_mode=Markdown" \
-            --data-urlencode "text=✅ *KBO 일일 업데이트 완료*
-
-📅 ${DATE}
-⚾ 경기 결과 및 예측 업데이트
-🎯 배트맨 분석 갱신
-🦁 삼성 현황 갱신
-
-🔗 https://namjinwoo.github.io/kbo/"
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "parse_mode=Markdown" \
+            --data-urlencode "text=${TEXT}"
 
       - name: Notify failure
         if: failure()
         run: |
+          TEXT=$(printf '❌ *KBO 업데이트 실패*\n\n확인: https://github.com/NamJinWoo/kbo_predict/actions')
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "parse_mode=Markdown" \
-            --data-urlencode "text=❌ *KBO 업데이트 실패*
-
-확인: https://github.com/NamJinWoo/kbo_predict/actions"
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "parse_mode=Markdown" \
+            --data-urlencode "text=${TEXT}"
