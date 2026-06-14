@@ -42,3 +42,31 @@ jobs:
           git add data/kbo.db
           git diff --cached --quiet || git commit -m "chore: daily DB update $(date +'%Y-%m-%d')"
           git push
+
+      - name: Telegram 완료 알림
+        if: success()
+        run: |
+          DATE=$(date +'%Y-%m-%d %H:%M KST' --date='+9 hours')
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=✅ *KBO 일일 업데이트 완료*
+
+📅 ${DATE}
+⚾ 경기 결과 및 예측 업데이트
+🎯 배트맨 분석 갱신
+🦁 삼성 현황 갱신
+
+🔗 https://namjinwoo.github.io/kbo/"
+
+      - name: Telegram 실패 알림
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=❌ *KBO 업데이트 실패*
+
+오늘 자동 빌드가 실패했습니다.
+GitHub Actions에서 로그를 확인해주세요.
+🔗 https://github.com/NamJinWoo/kbo_predict/actions"
