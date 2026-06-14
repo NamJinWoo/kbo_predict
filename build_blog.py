@@ -776,8 +776,9 @@ def build_index(completed_dates: list, upcoming_dates: list,
 </div>
 
 <div class="tab-bar">
-  <button class="tab-btn active" onclick="switchTab('games', this)">오늘 경기 분석</button>
-  <button class="tab-btn"        onclick="switchTab('preds', this)">다음 경기 예상</button>
+  <button class="tab-btn active" onclick="switchTab('games', this)">경기 분석</button>
+  <button class="tab-btn"        onclick="switchTab('preds', this)">경기 예상</button>
+  <button class="tab-btn"        onclick="location.href='samsung.html'" style="color:#C8A951">🦁 삼성</button>
   <button class="tab-btn"        onclick="switchTab('intro', this)">소개</button>
 </div>
 
@@ -812,6 +813,279 @@ function switchTab(name, btn) {{
     return _html_page("KBO 경기 예측 블로그", body)
 
 
+# ── 삼성 라이온즈 전용 페이지 ────────────────────────────────────
+
+SAMSUNG_BLUE = "#074CA1"
+SAMSUNG_GOLD = "#C8A951"
+
+def build_samsung_page(samsung_stat, samsung_games: list, leaders: dict) -> str:
+    """삼성 라이온즈 전용 스탯 페이지 생성."""
+
+    # ── 팀 현황 카드 ──
+    if samsung_stat:
+        rank      = samsung_stat.rank
+        wins      = samsung_stat.wins
+        draws     = samsung_stat.draws
+        losses    = samsung_stat.losses
+        win_pct   = samsung_stat.win_pct
+        rpg       = round(samsung_stat.runs_per_game, 2) if samsung_stat.runs_per_game else "-"
+        rapg      = round(samsung_stat.runs_allowed_per_game, 2) if samsung_stat.runs_allowed_per_game else "-"
+        last10    = samsung_stat.last10 or "-"
+        streak    = samsung_stat.streak or "-"
+        home_rec  = samsung_stat.home_record or "-"
+        away_rec  = samsung_stat.away_record or "-"
+        games_n   = samsung_stat.games or 0
+    else:
+        rank = wins = draws = losses = games_n = "-"
+        win_pct = rpg = rapg = "-"
+        last10 = streak = home_rec = away_rec = "-"
+
+    streak_color = "#22c55e" if str(streak).startswith("W") or "연승" in str(streak) else "#f87171"
+
+    team_card = f"""
+<div class="ss-team-card">
+  <div class="ss-rank">
+    <div class="ss-rank-num">{rank}위</div>
+    <div class="ss-rank-label">리그 순위</div>
+  </div>
+  <div class="ss-record">
+    <div class="ss-wdl">{wins}승 {draws}무 {losses}패</div>
+    <div class="ss-pct">승률 {win_pct} · {games_n}경기</div>
+  </div>
+  <div class="ss-streak" style="color:{streak_color}">
+    <div class="ss-streak-val">{streak}</div>
+    <div class="ss-streak-label">현재 연속</div>
+  </div>
+</div>
+
+<div class="ss-stat-row">
+  <div class="ss-stat-chip">
+    <div class="ss-stat-label">경기당 득점</div>
+    <div class="ss-stat-val">{rpg}</div>
+  </div>
+  <div class="ss-stat-chip">
+    <div class="ss-stat-label">경기당 실점</div>
+    <div class="ss-stat-val">{rapg}</div>
+  </div>
+  <div class="ss-stat-chip">
+    <div class="ss-stat-label">최근 10경기</div>
+    <div class="ss-stat-val" style="font-size:1rem">{last10}</div>
+  </div>
+  <div class="ss-stat-chip">
+    <div class="ss-stat-label">홈 전적</div>
+    <div class="ss-stat-val" style="font-size:0.95rem">{home_rec}</div>
+  </div>
+  <div class="ss-stat-chip">
+    <div class="ss-stat-label">원정 전적</div>
+    <div class="ss-stat-val" style="font-size:0.95rem">{away_rec}</div>
+  </div>
+</div>"""
+
+    # ── 최근 경기 차트 (Chart.js) ──
+    recent15 = [g for g in samsung_games if g.away_score is not None][:15]
+    recent15.reverse()  # 오래된→최신 순
+
+    labels, scored, allowed, results = [], [], [], []
+    for g in recent15:
+        is_home = g.home_team == "삼성"
+        ss = g.home_score if is_home else g.away_score
+        sa = g.away_score if is_home else g.home_score
+        opp = g.away_team if is_home else g.home_team
+        labels.append(f"{g.game_date.strftime('%-m/%-d')} vs {opp}")
+        scored.append(ss)
+        allowed.append(sa)
+        if ss > sa:   results.append("W")
+        elif ss < sa: results.append("L")
+        else:         results.append("D")
+
+    labels_js  = str(labels).replace("'", '"')
+    scored_js  = str(scored)
+    allowed_js = str(allowed)
+    results_js = str(results).replace("'", '"')
+
+    chart_section = f"""
+<div class="ss-section">
+  <div class="ss-section-title">최근 {len(recent15)}경기 득실점</div>
+  <div class="ss-chart-wrap">
+    <canvas id="scoreChart"></canvas>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script>
+  (function(){{
+    var labels  = {labels_js};
+    var scored  = {scored_js};
+    var allowed = {allowed_js};
+    var results = {results_js};
+    var bgScored  = scored.map((_,i) => results[i]==='W' ? '#3b82f6' : results[i]==='L' ? '#475569' : '#94a3b8');
+    var bgAllowed = allowed.map(() => '#ef4444aa');
+    new Chart(document.getElementById('scoreChart'), {{
+      type: 'bar',
+      data: {{
+        labels: labels,
+        datasets: [
+          {{ label: '득점', data: scored,  backgroundColor: bgScored,  borderRadius: 4, order: 1 }},
+          {{ label: '실점', data: allowed, backgroundColor: bgAllowed, borderRadius: 4, order: 2 }},
+        ]
+      }},
+      options: {{
+        responsive: true,
+        plugins: {{
+          legend: {{ labels: {{ color: '#94a3b8', font: {{ size: 12 }} }} }},
+          tooltip: {{
+            callbacks: {{
+              title: ctx => labels[ctx[0].dataIndex],
+              afterBody: ctx => '결과: ' + results[ctx[0].dataIndex],
+            }}
+          }}
+        }},
+        scales: {{
+          x: {{ ticks: {{ color: '#64748b', font: {{ size: 10 }} }}, grid: {{ color: '#1e293b' }} }},
+          y: {{ ticks: {{ color: '#64748b' }}, grid: {{ color: '#1e293b' }}, beginAtZero: true }},
+        }}
+      }}
+    }});
+  }})();
+  </script>
+</div>"""
+
+    # ── 최근 경기 결과 목록 ──
+    game_rows = ""
+    for g in reversed(recent15):
+        is_home = g.home_team == "삼성"
+        ss = g.home_score if is_home else g.away_score
+        sa = g.away_score if is_home else g.home_score
+        opp = g.away_team if is_home else g.home_team
+        home_label = "홈" if is_home else "원정"
+        if ss > sa:
+            result_badge = '<span class="ss-win">W</span>'
+        elif ss < sa:
+            result_badge = '<span class="ss-loss">L</span>'
+        else:
+            result_badge = '<span class="ss-draw">D</span>'
+        game_rows += f"""
+<div class="ss-game-row">
+  <div class="ss-game-date">{g.game_date.strftime('%-m/%-d')} <span class="ss-home-label">({home_label})</span></div>
+  <div class="ss-game-opp">vs {opp}</div>
+  <div class="ss-game-score">{ss} - {sa}</div>
+  {result_badge}
+</div>"""
+
+    games_section = f"""
+<div class="ss-section">
+  <div class="ss-section-title">최근 경기 결과</div>
+  <div class="ss-games-list">{game_rows}</div>
+</div>"""
+
+    # ── 리그 상위권 삼성 선수 ──
+    SAMSUNG_PLAYERS = {
+        "최원준","박성한","구자욱","김지찬","디아즈","오스틴","강민호","이재현",
+        "김헌곤","류지혁","맥키넌","원태인","양창섭","백정현","오러클린","임창민",
+        "이승현","김재윤","레예스","페라자","황동재","황재균","강한울","조상우",
+    }
+
+    def leader_rows(data: list) -> str:
+        html_out = ""
+        for item in data:
+            stat = item["stat"]
+            top3 = item["top3"]
+            for i, entry in enumerate(top3):
+                name = entry["name"]
+                val  = entry["value"]
+                is_ss = name in SAMSUNG_PLAYERS
+                rank_badge = ["🥇","🥈","🥉"][i] if i < 3 else ""
+                row_cls = "ss-leader-row ss-leader-highlight" if is_ss else "ss-leader-row"
+                html_out += f"""
+<div class="{row_cls}">
+  <span class="ss-leader-rank">{rank_badge}</span>
+  <span class="ss-leader-stat">{stat if i==0 else ""}</span>
+  <span class="ss-leader-name">{name}{"  🦁" if is_ss else ""}</span>
+  <span class="ss-leader-val">{val}</span>
+</div>"""
+        return html_out
+
+    bat_rows = leader_rows(leaders.get("batting", []))
+    pit_rows = leader_rows(leaders.get("pitching", []))
+
+    leaders_section = f"""
+<div class="ss-section">
+  <div class="ss-section-title">리그 타격 순위 (삼성 선수 강조)</div>
+  <div class="ss-leaders">{bat_rows}</div>
+</div>
+<div class="ss-section">
+  <div class="ss-section-title">리그 투구 순위 (삼성 선수 강조)</div>
+  <div class="ss-leaders">{pit_rows}</div>
+</div>"""
+
+    css = """
+.ss-team-card {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg, #0a2244, #074CA1);
+  border-radius: 16px; padding: 20px; margin-bottom: 12px;
+  border: 1px solid #1d4ed8;
+}
+.ss-rank-num { font-size: 2.4rem; font-weight: 900; color: #C8A951; line-height: 1; }
+.ss-rank-label { font-size: 0.7rem; color: #94a3b8; margin-top: 2px; }
+.ss-wdl { font-size: 1.2rem; font-weight: 800; color: #fff; }
+.ss-pct { font-size: 0.8rem; color: #93c5fd; margin-top: 4px; }
+.ss-streak-val { font-size: 1.3rem; font-weight: 800; }
+.ss-streak-label { font-size: 0.7rem; color: #94a3b8; margin-top: 2px; }
+.ss-stat-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.ss-stat-chip {
+  flex: 1; min-width: 80px; background: #1e293b; border-radius: 10px;
+  padding: 10px 8px; text-align: center; border: 1px solid #334155;
+}
+.ss-stat-label { font-size: 0.68rem; color: #64748b; margin-bottom: 4px; }
+.ss-stat-val { font-size: 1.1rem; font-weight: 800; color: #e2e8f0; }
+.ss-section { margin-bottom: 24px; }
+.ss-section-title {
+  font-size: 0.85rem; font-weight: 700; color: #C8A951;
+  margin-bottom: 10px; padding-bottom: 6px;
+  border-bottom: 1px solid #1e293b; letter-spacing: 0.5px;
+}
+.ss-chart-wrap { background: #1e293b; border-radius: 12px; padding: 16px; }
+.ss-games-list { display: flex; flex-direction: column; gap: 6px; }
+.ss-game-row {
+  display: flex; align-items: center; gap: 10px;
+  background: #1e293b; border-radius: 8px; padding: 10px 12px;
+  font-size: 0.85rem;
+}
+.ss-game-date { color: #64748b; min-width: 70px; }
+.ss-home-label { font-size: 0.72rem; }
+.ss-game-opp { flex: 1; font-weight: 600; }
+.ss-game-score { font-weight: 800; font-size: 1rem; min-width: 50px; text-align: right; }
+.ss-win  { background: #14532d; color: #4ade80; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 0.8rem; }
+.ss-loss { background: #450a0a; color: #f87171; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 0.8rem; }
+.ss-draw { background: #1e293b; color: #94a3b8; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 0.8rem; border: 1px solid #334155; }
+.ss-leaders { display: flex; flex-direction: column; gap: 3px; }
+.ss-leader-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px; font-size: 0.82rem;
+}
+.ss-leader-highlight { background: #0f2744; border: 1px solid #1d4ed8; }
+.ss-leader-rank { min-width: 22px; text-align: center; }
+.ss-leader-stat { min-width: 55px; color: #64748b; font-size: 0.75rem; }
+.ss-leader-name { flex: 1; font-weight: 600; }
+.ss-leader-val { font-weight: 800; color: #60a5fa; }"""
+
+    body = f"""
+<style>{css}</style>
+<div class="page-header">
+  <a class="back-btn" href="index.html">‹ 홈</a>
+  <div>
+    <div class="page-title">🦁 삼성 라이온즈</div>
+    <div class="page-subtitle">2026 시즌 현황</div>
+  </div>
+</div>
+<div style="padding:12px 16px">
+{team_card}
+{chart_section}
+{games_section}
+{leaders_section}
+</div>"""
+
+    return _html_page("삼성 라이온즈 — KBO 예측", body)
+
+
 # ── 메인 빌드 ────────────────────────────────────────────────────
 
 def main():
@@ -825,6 +1099,12 @@ def main():
         if latest:
             for ts in TeamStat.query.filter_by(scraped_at=latest.scraped_at).all():
                 team_stats[ts.team] = ts
+
+        # 삼성 경기 (최근 15경기)
+        from app.models import db as _db
+        samsung_games = RecentGame.query.filter(
+            _db.or_(RecentGame.away_team == "삼성", RecentGame.home_team == "삼성")
+        ).order_by(RecentGame.game_date.desc()).limit(15).all()
 
         # 완료 경기 (최근 7일치)
         from collections import defaultdict
@@ -860,6 +1140,15 @@ def main():
             html = build_prediction_page(d, games, team_stats)
             (OUT_DIR / "predictions" / f"{d.isoformat()}.html").write_text(html, encoding="utf-8")
             print(f"    → predictions/{d.isoformat()}.html ({len(games)}경기)")
+
+    # 삼성 라이온즈 페이지
+    print("  🦁 삼성 라이온즈 페이지 생성...")
+    from app.scraper import scrape_samsung_leaders
+    leaders = scrape_samsung_leaders()
+    samsung_stat = team_stats.get("삼성")
+    samsung_html = build_samsung_page(samsung_stat, samsung_games, leaders)
+    (OUT_DIR / "samsung.html").write_text(samsung_html, encoding="utf-8")
+    print("    → samsung.html")
 
     # 인덱스 페이지
     print("  📄 index.html 생성...")

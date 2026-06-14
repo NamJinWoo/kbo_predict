@@ -397,6 +397,66 @@ def backfill_missing_dates(existing_dates: set, lookback_days: int = 30) -> list
     return all_results
 
 
+def scrape_samsung_leaders() -> dict:
+    """statiz 삼성 팀 페이지에서 리그 순위표 + 삼성 선수 리더 파싱."""
+    try:
+        resp = requests.get(
+            "https://statiz.co.kr/?page=team&t_code=1001",
+            headers=HEADERS, timeout=10,
+        )
+        resp.raise_for_status()
+        html = resp.text
+    except Exception:
+        return {"batting": [], "pitching": [], "standings": []}
+
+    tables = re.findall(r"<table[^>]*>(.*?)</table>", html, re.DOTALL)
+    result: dict = {"batting": [], "pitching": [], "standings": []}
+
+    def parse_leader_table(tbl_html: str) -> list[dict]:
+        """항목 / 1위 / 2위 / 3위 구조 테이블 파싱."""
+        tbody = re.search(r"<tbody>(.*?)</tbody>", tbl_html, re.DOTALL)
+        if not tbody:
+            return []
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", tbody.group(1), re.DOTALL)
+        leaders = []
+        for row in rows:
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+            if len(cells) < 2:
+                continue
+            label = _clean(cells[0])
+            entries = []
+            for cell in cells[1:]:
+                raw = _clean(cell)
+                # "이름0.384" 형태 분리
+                m = re.match(r"(.+?)(\d[\d.]+)$", raw)
+                if m:
+                    entries.append({"name": m.group(1).strip(), "value": m.group(2)})
+            leaders.append({"stat": label, "top3": entries})
+        return leaders
+
+    def parse_standings_table(tbl_html: str) -> list[dict]:
+        tbody = re.search(r"<tbody>(.*?)</tbody>", tbl_html, re.DOTALL)
+        if not tbody:
+            return []
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", tbody.group(1), re.DOTALL)
+        standings = []
+        for row in rows:
+            cells = [_clean(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)]
+            if len(cells) >= 10:
+                standings.append({
+                    "rank": cells[0], "team": cells[1],
+                    "games": cells[2], "wins": cells[3], "draws": cells[4], "losses": cells[5],
+                    "gb": cells[6], "win_pct": cells[7], "runs": cells[8], "runs_allowed": cells[9],
+                })
+        return standings
+
+    if len(tables) >= 4:
+        result["batting"]   = parse_leader_table(tables[1])   # 타격 리더
+        result["standings"] = parse_standings_table(tables[2]) # 순위표
+        result["pitching"]  = parse_leader_table(tables[3])   # 투구 리더
+    return result
+
+
 def _parse_ul_blocks(html: str) -> list[dict]:
     """Parse all <ul> blocks into structured label/value dicts."""
     ul_blocks = re.findall(r"<ul[^>]*>(.*?)</ul>", html, re.DOTALL)
