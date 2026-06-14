@@ -833,7 +833,12 @@ def build_betman_page(games_picks: list, game_date) -> str:
         # 배팅 종목 행
         def conf_bar(conf):
             color = "#22c55e" if conf >= 63 else ("#f59e0b" if conf >= 57 else "#64748b")
-            return f'<div class="bt-bar-wrap"><div class="bt-bar" style="width:{conf:.0f}%;background:{color}"></div><span class="bt-bar-pct">{conf:.1f}%</span></div>'
+            return (
+                f'<div class="bt-bar-row">'
+                f'<div class="bt-bar-wrap"><div class="bt-bar" style="width:{conf:.0f}%;background:{color}"></div></div>'
+                f'<span class="bt-bar-pct">{conf:.1f}%</span>'
+                f'</div>'
+            )
 
         win   = p["win"]
         uo    = p["uo"]
@@ -977,9 +982,10 @@ def build_betman_page(games_picks: list, game_date) -> str:
 .bt-item-best { border-color: #1d4ed8; background: #0a1628; }
 .bt-item-label { font-size: 0.68rem; color: #64748b; margin-bottom: 4px; }
 .bt-item-pick { font-size: 0.95rem; font-weight: 800; margin-bottom: 6px; }
-.bt-bar-wrap { background: #1e293b; border-radius: 4px; height: 6px; position: relative; margin-bottom: 4px; }
+.bt-bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.bt-bar-wrap { flex: 1; background: #0f172a; border-radius: 4px; height: 6px; }
 .bt-bar { height: 6px; border-radius: 4px; }
-.bt-bar-pct { font-size: 0.72rem; color: #94a3b8; }
+.bt-bar-pct { font-size: 0.72rem; color: #94a3b8; min-width: 36px; text-align: right; white-space: nowrap; }
 .bt-item-sub { font-size: 0.65rem; color: #475569; margin-top: 2px; }
 .bt-lambda { padding: 8px 16px 12px; font-size: 0.75rem; color: #475569; }
 .bt-section { background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #334155; }
