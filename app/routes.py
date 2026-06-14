@@ -565,6 +565,37 @@ def admin_scrape():
         db.session.rollback()
         return jsonify({"ok": False, "error": f"recent_results: {e}"}), 500
 
+    # ── 누락 날짜 백필 (KBO API) ───────────────────────────────────
+    try:
+        from app.scraper import backfill_missing_dates
+        existing_dates = {r.game_date for r in RecentGame.query.with_entities(RecentGame.game_date).all()}
+        backfill_list = backfill_missing_dates(existing_dates, lookback_days=RETENTION_DAYS)
+        backfilled = 0
+        for r in backfill_list:
+            exists = RecentGame.query.filter_by(
+                game_date=r["game_date"], away_team=r["away_team"], home_team=r["home_team"]
+            ).first()
+            if exists:
+                continue
+            rg = RecentGame(
+                scraped_at=now,
+                game_date=r["game_date"],
+                away_team=r["away_team"],
+                home_team=r["home_team"],
+                away_score=r["away_score"],
+                home_score=r["home_score"],
+                win_pitcher=r.get("win_pitcher", ""),
+                lose_pitcher=r.get("lose_pitcher", ""),
+                save_pitcher=r.get("save_pitcher", ""),
+                hold_pitcher=r.get("hold_pitcher", ""),
+                stadium=r.get("stadium", ""),
+            )
+            db.session.add(rg)
+            backfilled += 1
+        scraped += backfilled
+    except Exception:
+        pass  # 백필 실패해도 메인 스크래핑 결과는 유지
+
     db.session.commit()
 
     # 블로그 빌드를 백그라운드로 실행 (완료 안 기다림)

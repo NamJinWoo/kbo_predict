@@ -337,6 +337,66 @@ def scrape_upcoming_games() -> list[dict]:
     return upcoming
 
 
+def scrape_results_for_date(target_date: date) -> list[dict]:
+    """KBO 공식 API로 특정 날짜 완료 경기 결과 조회.
+    statiz 홈에서 보이지 않는 과거 날짜 백필에 사용.
+    """
+    date_str = target_date.strftime("%Y%m%d")
+    try:
+        resp = requests.post(
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList",
+            headers=KBO_HEADERS, timeout=10,
+            data=f"date={date_str}&leId=1&srId=0",
+        )
+        resp.raise_for_status()
+        games = resp.json().get("game", [])
+    except Exception:
+        return []
+
+    results = []
+    for g in games:
+        if str(g.get("G_DT", "")) != date_str:
+            continue
+        if str(g.get("GAME_RESULT_CK", "0")) != "1":
+            continue  # 완료 경기만
+        away_team = (g.get("AWAY_NM") or "").strip()
+        home_team = (g.get("HOME_NM") or "").strip()
+        if not away_team or not home_team:
+            continue
+        try:
+            away_score = int(g.get("T_SCORE_CN") or 0)
+            home_score = int(g.get("B_SCORE_CN") or 0)
+        except (ValueError, TypeError):
+            continue
+        results.append({
+            "game_date":    target_date,
+            "away_team":    away_team,
+            "home_team":    home_team,
+            "away_score":   away_score,
+            "home_score":   home_score,
+            "win_pitcher":  (g.get("W_PIT_P_NM") or "").strip(),
+            "lose_pitcher": (g.get("L_PIT_P_NM") or "").strip(),
+            "save_pitcher": (g.get("SV_PIT_P_NM") or "").strip(),
+            "hold_pitcher": "",
+            "stadium":      (g.get("S_NM") or "").strip(),
+        })
+    return results
+
+
+def backfill_missing_dates(existing_dates: set, lookback_days: int = 30) -> list[dict]:
+    """최근 lookback_days일 중 existing_dates에 없는 날짜를 KBO API로 채움."""
+    today = date.today()
+    all_results = []
+    for i in range(1, lookback_days + 1):
+        d = today - timedelta(days=i)
+        if d in existing_dates:
+            continue
+        day_results = scrape_results_for_date(d)
+        if day_results:
+            all_results.extend(day_results)
+    return all_results
+
+
 def _parse_ul_blocks(html: str) -> list[dict]:
     """Parse all <ul> blocks into structured label/value dicts."""
     ul_blocks = re.findall(r"<ul[^>]*>(.*?)</ul>", html, re.DOTALL)
@@ -583,6 +643,7 @@ def scrape_all() -> dict:
         "standings":      merged,
         "today_games":    upcoming,
         "recent_results": recent_results,
+        "backfill_needed": True,  # routes에서 누락 날짜 백필 실행
     }
 
 
