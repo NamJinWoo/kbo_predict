@@ -38,6 +38,7 @@ jobs:
 
       - name: Commit updated DB back to kbo_predict
         run: |
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/NamJinWoo/kbo_predict.git
           git add data/kbo.db
           git diff --cached --quiet || git commit -m "chore: daily DB update $(date +'%Y-%m-%d')"
           git push
