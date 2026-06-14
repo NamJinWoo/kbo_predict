@@ -778,6 +778,7 @@ def build_index(completed_dates: list, upcoming_dates: list,
 <div class="tab-bar">
   <button class="tab-btn active" onclick="switchTab('games', this)">경기 분석</button>
   <button class="tab-btn"        onclick="switchTab('preds', this)">경기 예상</button>
+  <button class="tab-btn"        onclick="location.href='betman.html'" style="color:#f59e0b">🎯 배트맨</button>
   <button class="tab-btn"        onclick="location.href='samsung.html'" style="color:#C8A951">🦁 삼성</button>
   <button class="tab-btn"        onclick="switchTab('intro', this)">소개</button>
 </div>
@@ -811,6 +812,213 @@ function switchTab(name, btn) {{
 </script>"""
 
     return _html_page("KBO 경기 예측 블로그", body)
+
+
+# ── 배트맨 배팅 분석 페이지 ─────────────────────────────────────
+
+def build_betman_page(games_picks: list, game_date) -> str:
+    """배트맨 종목별 추천 + 조합 배팅 가이드 페이지."""
+    from app.simulator import calc_betman_picks
+
+    date_str = game_date.strftime("%Y년 %-m월 %-d일")
+
+    # ── 각 경기 픽 카드 ──
+    cards_html = ""
+    combo_picks = []  # 조합 추천용
+
+    for idx, (tg, sim) in enumerate(games_picks):
+        p = calc_betman_picks(sim)
+        away, home = p["away"], p["home"]
+
+        # 배팅 종목 행
+        def conf_bar(conf):
+            color = "#22c55e" if conf >= 63 else ("#f59e0b" if conf >= 57 else "#64748b")
+            return f'<div class="bt-bar-wrap"><div class="bt-bar" style="width:{conf:.0f}%;background:{color}"></div><span class="bt-bar-pct">{conf:.1f}%</span></div>'
+
+        win   = p["win"]
+        uo    = p["uo"]
+        oe    = p["oe"]
+        best  = p["best"]
+
+        is_best_win = best["type"] == "승패"
+        is_best_uo  = best["type"] == "언더오버"
+        is_best_oe  = best["type"] == "홀짝"
+
+        ambig_badge = '<span class="bt-ambig">⚠ 애매한 경기</span>' if p["is_ambiguous"] else ""
+        no_pit_badge = '<span class="bt-nopitch">선발 미정</span>' if p["no_pitcher"] else ""
+        best_badge = f'<span class="bt-best-badge">★ 추천: {best["type"]} — {best["detail"]}</span>'
+
+        # 조합 추천 대상 (신뢰도 58% 이상 + 비애매)
+        if not p["is_ambiguous"] and best["conf"] >= 58:
+            combo_picks.append({
+                "game": f"{away} vs {home}",
+                "pick": best["pick"],
+                "type": best["type"],
+                "conf": best["conf"],
+                "detail": best["detail"],
+            })
+
+        cards_html += f"""
+<div class="bt-card {'bt-ambig-card' if p['is_ambiguous'] else ''}">
+  <div class="bt-card-header">
+    <div class="bt-matchup">{away} <span class="bt-at">@</span> {home}</div>
+    <div class="bt-badges">{no_pit_badge}{ambig_badge}</div>
+  </div>
+
+  <div class="bt-best-row">{best_badge}</div>
+
+  <div class="bt-grid">
+    <div class="bt-item {'bt-item-best' if is_best_win else ''}">
+      <div class="bt-item-label">승패</div>
+      <div class="bt-item-pick">{win['pick']} 승</div>
+      {conf_bar(win['conf'])}
+      <div class="bt-item-sub">{away} {win['away_pct']}% / {home} {win['home_pct']}%</div>
+    </div>
+    <div class="bt-item {'bt-item-best' if is_best_uo else ''}">
+      <div class="bt-item-label">언더오버 ({uo['line']})</div>
+      <div class="bt-item-pick">{uo['pick']}</div>
+      {conf_bar(uo['conf'])}
+      <div class="bt-item-sub">예상합산 {p['lambda_away']+p['lambda_home']:.1f}점 · 오버 {uo['p_over']}%</div>
+    </div>
+    <div class="bt-item {'bt-item-best' if is_best_oe else ''}">
+      <div class="bt-item-label">홀짝</div>
+      <div class="bt-item-pick">{oe['pick']}</div>
+      {conf_bar(oe['conf'])}
+      <div class="bt-item-sub">홀 {oe['p_odd']}% / 짝 {oe['p_even']}%</div>
+    </div>
+  </div>
+
+  <div class="bt-lambda">기대득점 — {away} <strong>{p['lambda_away']}</strong>점 / {home} <strong>{p['lambda_home']}</strong>점</div>
+</div>"""
+
+    # ── 조합 배팅 추천 ──
+    if combo_picks:
+        combo_picks.sort(key=lambda x: x["conf"], reverse=True)
+        top = combo_picks[:min(5, len(combo_picks))]
+
+        def combo_section(picks, amount, label):
+            rows = ""
+            joint_conf = 1.0
+            for pk in picks:
+                joint_conf *= pk["conf"] / 100
+                rows += f"""
+<div class="cb-row">
+  <span class="cb-type">{pk['type']}</span>
+  <span class="cb-game">{pk['game']}</span>
+  <span class="cb-pick">{pk['pick']}</span>
+  <span class="cb-conf">{pk['conf']:.1f}%</span>
+</div>"""
+            joint_pct = joint_conf * 100
+            return f"""
+<div class="cb-block">
+  <div class="cb-title">{label} ({amount}원)</div>
+  {rows}
+  <div class="cb-joint">조합 적중 확률 ≈ <strong>{joint_pct:.1f}%</strong></div>
+</div>"""
+
+        combo_html = ""
+        if len(top) >= 2:
+            combo_html += combo_section(top[:2], "5,000", "2경기 조합")
+        if len(top) >= 3:
+            combo_html += combo_section(top[:3], "3,000", "3경기 조합")
+        if len(top) >= 4:
+            combo_html += combo_section(top[:4], "1,000", "4경기 조합")
+
+        combo_box = f"""
+<div class="bt-section">
+  <div class="bt-section-title">조합 배팅 가이드 (1,000~5,000원)</div>
+  <div class="bt-combo-note">신뢰도 58% 이상 경기만 선별 · 실제 배당률에 따라 기대값 다를 수 있음</div>
+  {combo_html}
+</div>"""
+    else:
+        combo_box = '<div class="bt-section"><div class="bt-combo-note">오늘은 자신있는 경기가 없습니다. 배팅을 권장하지 않습니다.</div></div>'
+
+    # ── 애매한 경기 요약 ──
+    ambig_list = [(tg, sim) for tg, sim in games_picks if calc_betman_picks(sim)["is_ambiguous"]]
+    ambig_html = ""
+    if ambig_list:
+        rows = ""
+        for tg, sim in ambig_list:
+            pk = calc_betman_picks(sim)
+            rows += f'<li><strong>{pk["away"]} vs {pk["home"]}</strong> — 승패 {pk["win"]["conf"]:.0f}% / 언더오버 {pk["uo"]["conf"]:.0f}% / 홀짝 {pk["oe"]["conf"]:.0f}%</li>'
+        ambig_html = f"""
+<div class="bt-section">
+  <div class="bt-section-title">⚠ 애매한 경기 (배팅 주의)</div>
+  <ul class="bt-ambig-list">{rows}</ul>
+  <div class="bt-combo-note">해당 경기는 시뮬레이션 신뢰도가 낮습니다. 조합에 포함 시 리스크 증가.</div>
+</div>"""
+
+    css = """
+.bt-card {
+  background: #1e293b; border-radius: 14px; margin-bottom: 16px;
+  border: 1px solid #334155; overflow: hidden;
+}
+.bt-ambig-card { border-color: #b45309; }
+.bt-card-header {
+  padding: 14px 16px 8px; display: flex;
+  justify-content: space-between; align-items: center;
+}
+.bt-matchup { font-size: 1rem; font-weight: 800; }
+.bt-at { color: #64748b; margin: 0 6px; font-weight: 400; }
+.bt-badges { display: flex; gap: 6px; }
+.bt-ambig { background: #422006; color: #fb923c; font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; font-weight: 700; }
+.bt-nopitch { background: #1e293b; color: #64748b; font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; border: 1px solid #334155; }
+.bt-best-row { padding: 0 16px 10px; }
+.bt-best-badge {
+  display: inline-block; background: #0f2744; border: 1px solid #1d4ed8;
+  color: #60a5fa; font-size: 0.75rem; font-weight: 700;
+  padding: 5px 12px; border-radius: 8px;
+}
+.bt-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; padding: 0 12px 10px; }
+.bt-item {
+  background: #0f172a; border-radius: 8px; padding: 10px 8px;
+  border: 1px solid #1e293b; text-align: center;
+}
+.bt-item-best { border-color: #1d4ed8; background: #0a1628; }
+.bt-item-label { font-size: 0.68rem; color: #64748b; margin-bottom: 4px; }
+.bt-item-pick { font-size: 0.95rem; font-weight: 800; margin-bottom: 6px; }
+.bt-bar-wrap { background: #1e293b; border-radius: 4px; height: 6px; position: relative; margin-bottom: 4px; }
+.bt-bar { height: 6px; border-radius: 4px; }
+.bt-bar-pct { font-size: 0.72rem; color: #94a3b8; }
+.bt-item-sub { font-size: 0.65rem; color: #475569; margin-top: 2px; }
+.bt-lambda { padding: 8px 16px 12px; font-size: 0.75rem; color: #475569; }
+.bt-section { background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #334155; }
+.bt-section-title { font-size: 0.85rem; font-weight: 700; color: #C8A951; margin-bottom: 10px; }
+.bt-combo-note { font-size: 0.72rem; color: #64748b; margin-bottom: 10px; }
+.cb-block { background: #0f172a; border-radius: 8px; padding: 12px; margin-bottom: 10px; border: 1px solid #1e293b; }
+.cb-title { font-size: 0.8rem; font-weight: 700; color: #e2e8f0; margin-bottom: 8px; }
+.cb-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid #1e293b; font-size: 0.78rem; }
+.cb-type { min-width: 60px; color: #64748b; }
+.cb-game { flex: 1; }
+.cb-pick { font-weight: 700; color: #60a5fa; min-width: 60px; }
+.cb-conf { color: #22c55e; font-weight: 700; }
+.cb-joint { font-size: 0.8rem; color: #94a3b8; margin-top: 8px; text-align: right; }
+.bt-ambig-list { padding-left: 18px; font-size: 0.82rem; line-height: 1.9; color: #94a3b8; }"""
+
+    body = f"""
+<style>{css}</style>
+<div class="page-header">
+  <a class="back-btn" href="index.html">‹ 홈</a>
+  <div>
+    <div class="page-title">🎯 배트맨 배팅 분석</div>
+    <div class="page-subtitle">{date_str} · 시뮬레이션 기반 종목별 확률</div>
+  </div>
+</div>
+<div style="padding:12px 16px">
+  <div class="bt-section" style="background:#0a1628;border-color:#1d4ed8">
+    <div style="font-size:0.75rem;color:#64748b;line-height:1.7">
+      ⚠ 본 분석은 몬테카를로 시뮬레이션 기반 통계적 확률입니다.<br>
+      실제 배트맨 배당률·라인과 다를 수 있으며, 수익을 보장하지 않습니다.<br>
+      배트맨은 국민체육진흥공단 운영 합법 스포츠 복권입니다.
+    </div>
+  </div>
+  <div class="bt-section-title" style="color:#e2e8f0;font-size:0.9rem;margin-bottom:12px">경기별 종목 분석</div>
+  {cards_html}
+  {combo_box}
+  {ambig_html}
+</div>"""
+
+    return _html_page("배트맨 배팅 분석 — KBO 예측", body)
 
 
 # ── 삼성 라이온즈 전용 페이지 ────────────────────────────────────
@@ -1140,6 +1348,29 @@ def main():
             html = build_prediction_page(d, games, team_stats)
             (OUT_DIR / "predictions" / f"{d.isoformat()}.html").write_text(html, encoding="utf-8")
             print(f"    → predictions/{d.isoformat()}.html ({len(games)}경기)")
+
+    # 배트맨 배팅 분석 페이지
+    print("  🎯 배트맨 분석 페이지 생성...")
+    with app.app_context():
+        from app.simulator import run_simulation, calc_betman_picks
+        from app.routes import _pitcher_days_since_last_start, _recent_rpg
+        betman_games = []
+        if upcoming_map:
+            next_date = sorted(upcoming_map.keys())[0]
+            for tg in upcoming_map[next_date]:
+                away_stat = team_stats.get(tg.away_team)
+                home_stat = team_stats.get(tg.home_team)
+                fatigue_a = _pitcher_days_since_last_start(tg.away_pitcher, next_date)
+                fatigue_h = _pitcher_days_since_last_start(tg.home_pitcher, next_date)
+                recent_a  = _recent_rpg(tg.away_team, next_date)
+                recent_h  = _recent_rpg(tg.home_team, next_date)
+                sim = run_simulation(tg.away_team, tg.home_team, away_stat, home_stat, tg,
+                                     fatigue_away_days=fatigue_a, fatigue_home_days=fatigue_h,
+                                     recent_rpg_away=recent_a, recent_rpg_home=recent_h)
+                betman_games.append((tg, sim))
+            betman_html = build_betman_page(betman_games, next_date)
+            (OUT_DIR / "betman.html").write_text(betman_html, encoding="utf-8")
+            print(f"    → betman.html ({len(betman_games)}경기)")
 
     # 삼성 라이온즈 페이지
     print("  🦁 삼성 라이온즈 페이지 생성...")

@@ -992,6 +992,75 @@ def home_pitcher_trap(sim: dict) -> str:
     return sim.get("home_team", "")
 
 
+# ── 배트맨 배팅 분석 ────────────────────────────────────────────
+
+def _poisson_pmf(k: int, lam: float) -> float:
+    from math import exp, factorial
+    if k < 0 or lam <= 0:
+        return 0.0
+    return (lam ** k * exp(-lam)) / factorial(min(k, 170))
+
+def _poisson_cdf(k: int, lam: float) -> float:
+    return sum(_poisson_pmf(i, lam) for i in range(k + 1))
+
+def calc_betman_picks(sim: dict) -> dict:
+    """시뮬레이션 결과에서 배트맨 베팅 종목별 확률 및 추천 반환."""
+    from math import exp
+
+    away      = sim["away_team"]
+    home      = sim["home_team"]
+    away_pct  = sim["away_win_pct"]   # shrinkage 적용 최종 확률
+    home_pct  = sim["home_win_pct"]
+    la        = sim.get("lambda_away", LEAGUE_AVG_RUNS)
+    lh        = sim.get("lambda_home", LEAGUE_AVG_RUNS)
+    lt        = la + lh                # 예상 합산 득점
+
+    # ── 승패 ──
+    win_fav    = away if away_pct >= home_pct else home
+    win_conf   = max(away_pct, home_pct)
+
+    # ── 홀짝 (Poisson 합의 홀수 확률) ──
+    p_odd  = 0.5 * (1 - exp(-2 * lt))
+    p_even = 1 - p_odd
+    oe_pick = "홀" if p_odd > p_even else "짝"
+    oe_conf = max(p_odd, p_even) * 100
+
+    # ── 언더오버 (기준선 8.5 — KBO 리그 평균 근사) ──
+    line = 8.5
+    p_over  = (1 - _poisson_cdf(int(line), lt)) * 100
+    p_under = 100 - p_over
+    uo_pick = "오버" if p_over > p_under else "언더"
+    uo_conf = max(p_over, p_under)
+
+    # ── 종목별 최고 신뢰도 → 추천 픽 결정 ──
+    candidates = [
+        {"type": "승패",    "pick": win_fav, "conf": win_conf,  "detail": f"{win_fav} 승리"},
+        {"type": "언더오버","pick": uo_pick, "conf": uo_conf,   "detail": f"합산 {line} {uo_pick} (예상 {lt:.1f}점)"},
+        {"type": "홀짝",    "pick": oe_pick, "conf": oe_conf,   "detail": f"합산 득점 {oe_pick} (P={max(p_odd,p_even)*100:.1f}%)"},
+    ]
+    best = max(candidates, key=lambda x: x["conf"])
+
+    # ── 애매함 판단 (두 종목 이상 신뢰도 차이 5%p 미만) ──
+    confs = sorted([c["conf"] for c in candidates], reverse=True)
+    is_ambiguous = (confs[0] - confs[1]) < 5.0 or confs[0] < 57.0
+
+    return {
+        "away": away, "home": home,
+        "win":  {"pick": win_fav, "conf": round(win_conf, 1),
+                 "away_pct": round(away_pct, 1), "home_pct": round(home_pct, 1)},
+        "uo":   {"pick": uo_pick, "conf": round(uo_conf, 1),
+                 "line": line, "lambda_total": round(lt, 2),
+                 "p_over": round(p_over, 1), "p_under": round(p_under, 1)},
+        "oe":   {"pick": oe_pick, "conf": round(oe_conf, 1),
+                 "p_odd": round(p_odd * 100, 1), "p_even": round(p_even * 100, 1)},
+        "best": best,
+        "is_ambiguous": is_ambiguous,
+        "lambda_away": round(la, 2),
+        "lambda_home": round(lh, 2),
+        "no_pitcher": not sim.get("away_pitcher") or not sim.get("home_pitcher"),
+    }
+
+
 # ── 경기 결과 분석 ──────────────────────────────────────────────
 
 def generate_result_analysis(
