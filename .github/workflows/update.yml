@@ -31,7 +31,12 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-      - name: Scrape and build blog
+      - name: Scrape KBO data
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scrape.py
+
+      - name: Build blog
         env:
           BLOG_ROOT: /tmp/blog
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
